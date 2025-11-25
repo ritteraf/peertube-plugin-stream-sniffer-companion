@@ -6,10 +6,10 @@ const { readJson, writeJson, requireAuth } = require('./lib-auth-manager.js');
 router.post('/', requireAuth, async (req, res) => {
 	const snifferId = req.snifferId;
 	const statusData = req.body || {};
-	if (!statusData || typeof statusData !== 'object' || Array.isArray(statusData) || !statusData.status || typeof statusData.status !== 'string') {
+	if (!statusData || typeof statusData !== 'object' || Array.isArray(statusData)) {
 		return res.status(400).json({
 			acknowledged: false,
-			message: 'Request body must be an object with status (string)',
+			message: 'Request body must be an object',
 			error: 'Invalid input'
 		});
 	}

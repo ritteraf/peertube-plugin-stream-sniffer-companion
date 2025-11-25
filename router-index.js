@@ -13,7 +13,7 @@ router.use((req, res, next) => {
 });
 
 router.use('/auth', require('./router-auth.js'));
-router.use('/config', require('./router-config.js'));
+router.use('/', require('./router-config.js'));
 router.use('/recording', require('./router-recording.js'));
 router.use('/hudl', require('./router-hudl.js'));
 router.use('/status', require('./router-status.js'));

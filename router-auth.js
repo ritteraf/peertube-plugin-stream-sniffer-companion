@@ -69,29 +69,7 @@ router.post('/', async (req, res) => {
 		});
 	}
 
-	// Authenticate user using PeerTube's internal helpers
-	let user = null;
-	try {
-		// Query user by username
-		const users = await peertubeHelpers.database.query('SELECT * FROM "user" WHERE username = $1', [username]);
-		if (!users || !users.rows || users.rows.length === 0) {
-			throw new Error('User not found');
-		}
-		user = users.rows[0];
-		// Check password using PeerTube's password check utility
-		// This is a workaround: PeerTube does not expose a direct password check helper, so you may need to use bcrypt directly
-		const bcrypt = require('bcryptjs');
-		const valid = await bcrypt.compare(password, user.password);
-		if (!valid) throw new Error('Invalid password');
-	} catch (err) {
-		return res.status(400).json({
-			error: 'INVALID_CREDENTIALS',
-			code: 'INVALID_CREDENTIALS',
-			message: 'Invalid PeerTube username or password',
-			hint: err.message
-		});
-	}
-
+	// Do NOT verify PeerTube credentials here. Just store for later API calls.
 	const now = Date.now();
 	const token = generateToken();
 	const expiresAt = new Date(now + 3600 * 1000).toISOString();
@@ -103,6 +81,7 @@ router.post('/', async (req, res) => {
 		streamToken: token,
 		tokenExpiresAt: expiresAt,
 		peertubeUsername: username,
+		peertubePassword: password, // Store for later PeerTube API calls
 		lastSeen: new Date(now).toISOString(),
 		systemInfo: systemInfo || {}
 	};
