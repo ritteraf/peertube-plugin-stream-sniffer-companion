@@ -21,6 +21,13 @@ async function register({ getRouter, registerSetting, settingsManager, peertubeH
     routerAuth.setPeertubeHelpers(peertubeHelpers);
   }
 
+  // Wire peertubeHelpers into router-config.js
+  try {
+    const routerConfig = require('./router-config.js');
+    if (routerConfig.setPeertubeHelpers) {
+      routerConfig.setPeertubeHelpers(peertubeHelpers);
+    }
+  } catch (e) {}
   // Optionally, wire peertubeHelpers into other routers/modules as needed
   try {
     const routerRecording = require('./router-recording.js');

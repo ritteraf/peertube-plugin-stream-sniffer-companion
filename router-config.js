@@ -1,3 +1,6 @@
+// PeerTube helpers injected by main.js
+let peertubeHelpers = null;
+function setPeertubeHelpers(helpers) { peertubeHelpers = helpers; }
 
 const express = require('express');
 const router = express.Router();
@@ -106,15 +109,16 @@ router.get('/my-channels', requireAuth, async (req, res) => {
 		const { getPeerTubeChannels } = require('./lib-peertube-api.js');
 		const snifferId = req.snifferId;
 		const sniffers = readJson('sniffers');
-		const token = sniffers[snifferId] && sniffers[snifferId].oauthToken;
-		if (!token) {
+		const username = sniffers[snifferId] && sniffers[snifferId].peertubeUsername;
+		const password = sniffers[snifferId] && sniffers[snifferId].peertubePassword;
+		if (!username || !password) {
 			return res.status(401).json({
 				username: null,
 				channels: [],
-				message: 'No PeerTube OAuth token found for sniffer'
+				message: 'No PeerTube credentials found for sniffer'
 			});
 		}
-		const { username, channels } = await getPeerTubeChannels(token);
+		const { channels } = await getPeerTubeChannels({ username, password, peertubeHelpers });
 		return res.status(200).json({
 			username,
 			channels,
@@ -136,14 +140,15 @@ router.get('/categories', requireAuth, async (req, res) => {
 		const { getPeerTubeCategories } = require('./lib-peertube-api.js');
 		const snifferId = req.snifferId;
 		const sniffers = readJson('sniffers');
-		const token = sniffers[snifferId] && sniffers[snifferId].oauthToken;
-		if (!token) {
+		const username = sniffers[snifferId] && sniffers[snifferId].peertubeUsername;
+		const password = sniffers[snifferId] && sniffers[snifferId].peertubePassword;
+		if (!username || !password) {
 			return res.status(401).json({
 				categories: [],
-				message: 'No PeerTube OAuth token found for sniffer'
+				message: 'No PeerTube credentials found for sniffer'
 			});
 		}
-		const categories = await getPeerTubeCategories(token);
+		const categories = await getPeerTubeCategories({ username, password, peertubeHelpers });
 		return res.status(200).json({
 			categories,
 			message: `Found ${categories.length} categories`
@@ -163,14 +168,16 @@ router.get('/privacy-options', requireAuth, async (req, res) => {
 		const { getPeerTubePrivacyOptions } = require('./lib-peertube-api.js');
 		const snifferId = req.snifferId;
 		const sniffers = readJson('sniffers');
-		const token = sniffers[snifferId] && sniffers[snifferId].oauthToken;
-		if (!token) {
+		const username = sniffers[snifferId] && sniffers[snifferId].peertubeUsername;
+		const password = sniffers[snifferId] && sniffers[snifferId].peertubePassword;
+		if (!username || !password) {
 			return res.status(401).json({
 				privacies: [],
-				message: 'No PeerTube OAuth token found for sniffer'
+				message: 'No PeerTube credentials found for sniffer'
 			});
 		}
-		const privacies = await getPeerTubePrivacyOptions(token);
+		const privacies = await getPeerTubePrivacyOptions({ username, password, peertubeHelpers });
+		router.setPeertubeHelpers = setPeertubeHelpers;
 		return res.status(200).json({
 			privacies,
 			message: `Found ${privacies.length} privacy options`
