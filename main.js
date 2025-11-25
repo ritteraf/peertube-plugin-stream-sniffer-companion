@@ -23,11 +23,14 @@ async function register({ getRouter, registerSetting, settingsManager, peertubeH
 
   // Wire peertubeHelpers into router-config.js
   try {
+    console.log('[PLUGIN main.js] About to require router-config.js and inject peertubeHelpers');
     const routerConfig = require('./router-config.js');
     if (routerConfig.setPeertubeHelpers) {
       routerConfig.setPeertubeHelpers(peertubeHelpers);
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('[PLUGIN] Failed to wire peertubeHelpers to router-config:', e);
+  }
   // Optionally, wire peertubeHelpers into other routers/modules as needed
   try {
     const routerRecording = require('./router-recording.js');
@@ -59,7 +62,7 @@ async function register({ getRouter, registerSetting, settingsManager, peertubeH
     label: 'Sniffer Authentication Secret',
     type: 'input',
     required: true,
-    description: 'Secret key for authenticating Stream Sniffer apps. Generate a secure random value (32+ characters).',
+    description: "Secret key for authenticating Stream Sniffer apps. Generate a secure random value (32+ characters). Copy/Paste this value during setup the of your stream sniffer(s). This will allow your sniffer(s) to communicate with PeerTube.",
     default: ''
   });
   registerSetting({
@@ -67,14 +70,14 @@ async function register({ getRouter, registerSetting, settingsManager, peertubeH
     label: 'HUDL Organization URL',
     type: 'input',
     required: false,
-    description: 'HUDL organization URL for automatic game schedule integration.'
+    description: "This is your HUDL 'fan' page. You can find this by searching for your school at fan.hudl.com"
   });
   registerSetting({
     name: 'schedule-cache-minutes',
-    label: 'Schedule Cache Duration (minutes)',
+    label: 'HUDL Schedule refresh interval (minutes)',
     type: 'input',
     required: false,
-    description: 'How long to cache HUDL schedules before refreshing (minutes)',
+    description: 'This value will control how often the plugin will check HUDL for updates to your team schedules. You can always manually refresh the team schedules inside your sniffer app.',
     default: 60
   });
 }

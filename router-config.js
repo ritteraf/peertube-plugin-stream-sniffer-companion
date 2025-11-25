@@ -1,6 +1,10 @@
+console.log('[PLUGIN router-config] router-config.js loaded');
 // PeerTube helpers injected by main.js
 let peertubeHelpers = null;
-function setPeertubeHelpers(helpers) { peertubeHelpers = helpers; }
+function setPeertubeHelpers(helpers) {
+	console.log('[PLUGIN router-config] setPeertubeHelpers called, helpers:', !!helpers);
+	peertubeHelpers = helpers;
+}
 
 const express = require('express');
 const router = express.Router();
@@ -138,17 +142,7 @@ router.get('/my-channels', requireAuth, async (req, res) => {
 router.get('/categories', requireAuth, async (req, res) => {
 	try {
 		const { getPeerTubeCategories } = require('./lib-peertube-api.js');
-		const snifferId = req.snifferId;
-		const sniffers = readJson('sniffers');
-		const username = sniffers[snifferId] && sniffers[snifferId].peertubeUsername;
-		const password = sniffers[snifferId] && sniffers[snifferId].peertubePassword;
-		if (!username || !password) {
-			return res.status(401).json({
-				categories: [],
-				message: 'No PeerTube credentials found for sniffer'
-			});
-		}
-		const categories = await getPeerTubeCategories({ username, password, peertubeHelpers });
+		const categories = await getPeerTubeCategories({ peertubeHelpers });
 		return res.status(200).json({
 			categories,
 			message: `Found ${categories.length} categories`
@@ -166,18 +160,7 @@ router.get('/categories', requireAuth, async (req, res) => {
 router.get('/privacy-options', requireAuth, async (req, res) => {
 	try {
 		const { getPeerTubePrivacyOptions } = require('./lib-peertube-api.js');
-		const snifferId = req.snifferId;
-		const sniffers = readJson('sniffers');
-		const username = sniffers[snifferId] && sniffers[snifferId].peertubeUsername;
-		const password = sniffers[snifferId] && sniffers[snifferId].peertubePassword;
-		if (!username || !password) {
-			return res.status(401).json({
-				privacies: [],
-				message: 'No PeerTube credentials found for sniffer'
-			});
-		}
-		const privacies = await getPeerTubePrivacyOptions({ username, password, peertubeHelpers });
-		router.setPeertubeHelpers = setPeertubeHelpers;
+		const privacies = await getPeerTubePrivacyOptions({ peertubeHelpers });
 		return res.status(200).json({
 			privacies,
 			message: `Found ${privacies.length} privacy options`
@@ -268,4 +251,6 @@ router.post('/configure', requireAuth, async (req, res) => {
 	});
 });
 
+router.setPeertubeHelpers = setPeertubeHelpers;
+console.log('[PLUGIN router-config] setPeertubeHelpers attached to router:', typeof router.setPeertubeHelpers === 'function');
 module.exports = router;
