@@ -1,8 +1,8 @@
 {
-  "name": "peertube-plugin-quickstart",
-  "description": "PeerTube plugin quickstart",
-  "version": "0.0.4",
-  "author": "Chocobozzz",
+  "name": "peertube-plugin-stream-sniffer-companion",
+  "description": "PeerTube plugin Stream Sniffer Companion",
+  "version": "0.1.0",
+  "author": "ritteraf",
   "bugs": "https://framagit.org/framasoft/peertube/peertube-plugin-quickstart/issues",
   "clientScripts": [
     {
@@ -33,6 +33,9 @@
   },
   "translations": {
     "fr-FR": "./languages/fr.json"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
   },
   "devDependencies": {
     "esbuild": "^0.14.36"
