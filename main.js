@@ -1,16 +1,48 @@
 
+
+// Global process-level error handlers for debugging
+process.on('uncaughtException', err => {
+  console.error('[PLUGIN uncaughtException]', err);
+});
+process.on('unhandledRejection', err => {
+  console.error('[PLUGIN unhandledRejection]', err);
+});
+
 const express = require('express');
 const routerIndex = require('./router-index.js');
 
-async function register({ getRouter, registerSetting, settingsManager }) {
+async function register({ getRouter, registerSetting, settingsManager, peertubeHelpers }) {
   // Wire settingsManager into router-auth
   const routerAuth = require('./router-auth.js');
   if (routerAuth.setSettingsManager) {
     routerAuth.setSettingsManager(settingsManager);
   }
+  if (routerAuth.setPeertubeHelpers) {
+    routerAuth.setPeertubeHelpers(peertubeHelpers);
+  }
+
+  // Optionally, wire peertubeHelpers into other routers/modules as needed
+  try {
+    const routerRecording = require('./router-recording.js');
+    if (routerRecording.setPeertubeHelpers) {
+      routerRecording.setPeertubeHelpers(peertubeHelpers);
+    }
+  } catch (e) {}
+  try {
+    const permLiveMgr = require('./lib-permanent-live-manager.js');
+    if (permLiveMgr.setPeertubeHelpers) {
+      permLiveMgr.setPeertubeHelpers(peertubeHelpers);
+    }
+  } catch (e) {}
 
   // Use getRouter to mount all plugin routes
   const router = getRouter();
+
+  // Add a /ping test route for debugging
+  router.get('/ping', (req, res) => {
+    res.json({ pong: true });
+  });
+
   // Mount all routes under /router (as before)
   router.use('/', require('./router-index.js'));
 

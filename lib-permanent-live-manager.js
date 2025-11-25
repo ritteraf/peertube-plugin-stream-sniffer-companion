@@ -1,7 +1,12 @@
 
 // Permanent live manager for per-team permanent live videos
 const { readJson, writeJson } = require('./lib-auth-manager.js');
+
 const peertubeApi = require('./lib-peertube-api.js');
+
+// PeerTube helpers injected by main.js
+let peertubeHelpers = null;
+function setPeertubeHelpers(helpers) { peertubeHelpers = helpers; }
 
 // Get permanent live info for a team
 function getPermanentLive(teamId) {
@@ -17,13 +22,15 @@ function getPermanentLive(teamId) {
 }
 
 // Create a permanent live video for a team (calls PeerTube API, stores in hudl-schedules)
+
 async function createPermanentLive(teamId, teamName, channelId, oauthToken) {
 	// Call PeerTube API to create a permanent live video
 	const live = await peertubeApi.createPermanentLive({
 		channelId,
 		name: `${teamName} - Permanent Live`,
 		description: `Permanent live stream for ${teamName}`,
-		oauthToken
+		oauthToken,
+		peertubeHelpers
 	});
 	if (!live || !live.id || !live.rtmpUrl || !live.streamKey) throw new Error('Failed to create permanent live');
 	// Store in hudl-schedules
@@ -43,11 +50,12 @@ async function createPermanentLive(teamId, teamName, channelId, oauthToken) {
 }
 
 // Delete a permanent live video for a team (calls PeerTube API, removes from hudl-schedules)
+
 async function deletePermanentLive(teamId, oauthToken) {
 	const schedules = readJson('hudl-schedules');
 	if (!schedules[teamId] || !schedules[teamId].permanentLiveVideoId) return false;
 	const videoId = schedules[teamId].permanentLiveVideoId;
-	await peertubeApi.deleteVideo(videoId, oauthToken);
+	await peertubeApi.deleteVideo(videoId, oauthToken, peertubeHelpers);
 	delete schedules[teamId].permanentLiveVideoId;
 	delete schedules[teamId].permanentLiveRtmpUrl;
 	delete schedules[teamId].permanentLiveStreamKey;
@@ -59,5 +67,6 @@ async function deletePermanentLive(teamId, oauthToken) {
 module.exports = {
 	getPermanentLive,
 	createPermanentLive,
-	deletePermanentLive
+	deletePermanentLive,
+	setPeertubeHelpers
 };

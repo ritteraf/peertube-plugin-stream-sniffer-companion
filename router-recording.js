@@ -1,3 +1,6 @@
+// PeerTube helpers injected by main.js
+let peertubeHelpers = null;
+function setPeertubeHelpers(helpers) { peertubeHelpers = helpers; }
 const express = require('express');
 const router = express.Router();
 const { readJson, writeJson, requireAuth } = require('./lib-auth-manager.js');
@@ -33,7 +36,7 @@ router.post('/recording-started', requireAuth, async (req, res) => {
 				error: 'No OAuth token'
 			});
 		}
-		const liveStream = await createLiveStream(token, event);
+		const liveStream = await createLiveStream(token, event, peertubeHelpers);
 		return res.status(200).json({
 			acknowledged: true,
 			message: 'Recording started',
@@ -82,7 +85,7 @@ router.post('/recording-started-permanent', requireAuth, async (req, res) => {
 				error: 'No OAuth token'
 			});
 		}
-		const liveStream = await getOrCreatePermanentLiveStream(token, event);
+		const liveStream = await getOrCreatePermanentLiveStream(token, event, peertubeHelpers);
 		return res.status(200).json({
 			acknowledged: true,
 			message: 'Using permanent live video',
@@ -99,6 +102,8 @@ router.post('/recording-started-permanent', requireAuth, async (req, res) => {
 		});
 	}
 });
+// Export setPeertubeHelpers for main.js
+module.exports.setPeertubeHelpers = setPeertubeHelpers;
 
 // POST /recording-stopped
 router.post('/recording-stopped', requireAuth, async (req, res) => {

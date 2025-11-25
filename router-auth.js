@@ -5,28 +5,24 @@ const fs = require('fs');
 const path = require('path');
 
 
-// Helper to get plugin settings, using PeerTube settingsManager if available
-let settingsManagerInstance = null;
-function setSettingsManager(sm) { settingsManagerInstance = sm; }
+
+// PeerTube will inject settingsManager into the router via setSettingsManager
+let settingsManager = null;
+function setSettingsManager(sm) { settingsManager = sm; }
 async function getPluginSettings() {
-	if (settingsManagerInstance) {
-		return {
-			'sniffer-auth-secret': await settingsManagerInstance.get('sniffer-auth-secret'),
-			'hudl-org-url': await settingsManagerInstance.get('hudl-org-url'),
-			'schedule-cache-minutes': await settingsManagerInstance.get('schedule-cache-minutes')
-		};
-	}
-	try {
-		const settingsPath = path.join(__dirname, 'storage', 'settings.json');
-		if (fs.existsSync(settingsPath)) {
-			return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-		}
-	} catch (e) {}
-	return {
-		'sniffer-auth-secret': process.env.SNIFFER_AUTH_SECRET || '',
-		'hudl-org-url': process.env.HUDL_ORG_URL || '',
-		'schedule-cache-minutes': 60
-	};
+  if (settingsManager) {
+    return {
+      'sniffer-auth-secret': await settingsManager.getSetting('sniffer-auth-secret'),
+      'hudl-org-url': await settingsManager.getSetting('hudl-org-url'),
+      'schedule-cache-minutes': await settingsManager.getSetting('schedule-cache-minutes')
+    };
+  }
+  // Fallback for dev/test only
+  return {
+    'sniffer-auth-secret': process.env.SNIFFER_AUTH_SECRET || '',
+    'hudl-org-url': process.env.HUDL_ORG_URL || '',
+    'schedule-cache-minutes': 60
+  };
 }
 
 
@@ -39,8 +35,11 @@ const {
 } = require('./lib-auth-manager.js');
 
 
-// PeerTube API for OAuth
-const { authenticateWithPassword } = require('./lib-peertube-api.js');
+
+
+// PeerTube helpers injected by main.js
+let peertubeHelpers = null;
+function setPeertubeHelpers(helpers) { peertubeHelpers = helpers; }
 
 // POST /auth
 router.post('/', async (req, res) => {
@@ -70,18 +69,20 @@ router.post('/', async (req, res) => {
 		});
 	}
 
-	// PeerTube OAuth client credentials (should be set in env or config)
-	const clientId = process.env.PEERTUBE_CLIENT_ID || settings['peertube-client-id'] || 'sniffer-client';
-	const clientSecret = process.env.PEERTUBE_CLIENT_SECRET || settings['peertube-client-secret'] || 'sniffer-secret';
-
-	let oauthAccessToken, oauthRefreshToken, accessTokenExpiresAt, refreshTokenExpiresAt;
+	// Authenticate user using PeerTube's internal helpers
+	let user = null;
 	try {
-		const oauth = await authenticateWithPassword({ username, password, clientId, clientSecret });
-		oauthAccessToken = oauth.accessToken;
-		oauthRefreshToken = oauth.refreshToken;
-		accessTokenExpiresAt = oauth.expiresAt;
-		// Assume refresh token expires in 14 days (PeerTube default)
-		refreshTokenExpiresAt = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+		// Query user by username
+		const users = await peertubeHelpers.database.query('SELECT * FROM "user" WHERE username = $1', [username]);
+		if (!users || !users.rows || users.rows.length === 0) {
+			throw new Error('User not found');
+		}
+		user = users.rows[0];
+		// Check password using PeerTube's password check utility
+		// This is a workaround: PeerTube does not expose a direct password check helper, so you may need to use bcrypt directly
+		const bcrypt = require('bcryptjs');
+		const valid = await bcrypt.compare(password, user.password);
+		if (!valid) throw new Error('Invalid password');
 	} catch (err) {
 		return res.status(400).json({
 			error: 'INVALID_CREDENTIALS',
@@ -101,9 +102,6 @@ router.post('/', async (req, res) => {
 		snifferId,
 		streamToken: token,
 		tokenExpiresAt: expiresAt,
-		oauthAccessToken,
-		oauthRefreshToken,
-		oauthExpiresAt: accessTokenExpiresAt,
 		peertubeUsername: username,
 		lastSeen: new Date(now).toISOString(),
 		systemInfo: systemInfo || {}
@@ -113,8 +111,6 @@ router.post('/', async (req, res) => {
 	return res.status(200).json({
 		token,
 		expiresAt,
-		accessTokenExpiresAt,
-		refreshTokenExpiresAt,
 		authMethod: {
 			header: 'X-Stream-Token',
 			value: token,
@@ -128,5 +124,6 @@ router.post('/', async (req, res) => {
 	});
 });
 
+router.setSettingsManager = setSettingsManager;
+router.setPeertubeHelpers = setPeertubeHelpers;
 module.exports = router;
-module.exports.setSettingsManager = setSettingsManager;
