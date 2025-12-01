@@ -1,36 +1,47 @@
 
-// Camera registry: camera assignment storage
-const { readJson, writeJson } = require('./lib-auth-manager.js');
 
-function getAssignments(snifferId) {
-	const cameras = readJson('cameras');
+// Camera registry: camera assignment storage using PeerTube's storageManager
+let storageManager = null;
+function setStorageManager(sm) { storageManager = sm; }
+
+// Async: get all assignments for a sniffer
+async function getAssignments(snifferId) {
+	if (!storageManager) throw new Error('storageManager not initialized');
+	const cameras = (await storageManager.getData('camera-assignments')) || {};
 	return cameras[snifferId] ? Object.values(cameras[snifferId]) : [];
 }
 
-function saveAssignments(snifferId, assignments) {
-	const cameras = readJson('cameras');
+// Async: save all assignments for a sniffer
+async function saveAssignments(snifferId, assignments) {
+	if (!storageManager) throw new Error('storageManager not initialized');
+	const cameras = (await storageManager.getData('camera-assignments')) || {};
 	cameras[snifferId] = {};
 	for (const assignment of assignments) {
 		cameras[snifferId][assignment.cameraId] = assignment;
 	}
-	writeJson('cameras', cameras);
+	await storageManager.storeData('camera-assignments', cameras);
 }
 
-function deleteAssignment(snifferId, cameraId) {
-	const cameras = readJson('cameras');
+// Async: delete a single assignment for a sniffer
+async function deleteAssignment(snifferId, cameraId) {
+	if (!storageManager) throw new Error('storageManager not initialized');
+	const cameras = (await storageManager.getData('camera-assignments')) || {};
 	if (cameras[snifferId]) {
 		delete cameras[snifferId][cameraId];
-		writeJson('cameras', cameras);
+		await storageManager.storeData('camera-assignments', cameras);
 	}
 }
 
-function deleteAllAssignments(snifferId) {
-	const cameras = readJson('cameras');
+// Async: delete all assignments for a sniffer
+async function deleteAllAssignments(snifferId) {
+	if (!storageManager) throw new Error('storageManager not initialized');
+	const cameras = (await storageManager.getData('camera-assignments')) || {};
 	delete cameras[snifferId];
-	writeJson('cameras', cameras);
+	await storageManager.storeData('camera-assignments', cameras);
 }
 
 module.exports = {
+	setStorageManager,
 	getAssignments,
 	saveAssignments,
 	deleteAssignment,
