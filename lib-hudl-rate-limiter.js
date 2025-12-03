@@ -29,7 +29,7 @@ class HudlRateLimiter {
         this.dayStart = Date.now();
       }
       if (this.requestCount >= this.maxRequestsPerDay) {
-        const err = new Error('HUDL daily request cap reached');
+        const err = new Error('Internal HUDL rate limit exceeded');
         this.queue.forEach(({ reject }) => reject(err));
         this.queue = [];
         break;

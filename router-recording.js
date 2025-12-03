@@ -16,20 +16,29 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				error: 'Invalid input'
 			});
 		}
-		       if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-		       let log = (await storageManager.getData('recording-log')) || {};
-		       if (!log[snifferId]) log[snifferId] = [];
-		       log[snifferId].push({
-			       type: 'started',
-			       ...event,
-			       timestamp: new Date().toISOString()
-		       });
-		       await storageManager.storeData('recording-log', log);
+		if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+		let log = (await storageManager.getData('recording-log')) || {};
+		if (!log[snifferId]) log[snifferId] = [];
+		log[snifferId].push({
+			type: 'started',
+			...event,
+			timestamp: new Date().toISOString()
+		});
+		await storageManager.storeData('recording-log', log);
 		// In production, create a new live stream via PeerTube API
 		try {
-			const { createLiveStream } = require('./lib-peertube-api.js');
-			const sniffers = (await storageManager.getData('sniffers')) || {};
-			const token = sniffers[snifferId] && sniffers[snifferId].oauthToken;
+			const { createPeerTubeLiveVideo } = require('./lib-peertube-api.js');
+			// Look up camera assignment by cameraId
+			const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
+			const cameraAssignment = cameraAssignments[snifferId] && cameraAssignments[snifferId][event.cameraId];
+			if (!cameraAssignment) {
+				return res.status(404).json({
+					acknowledged: false,
+					message: 'Camera assignment not found',
+					error: 'No camera config'
+				});
+			}
+			const token = cameraAssignment.oauthToken;
 			if (!token) {
 				return res.status(401).json({
 					acknowledged: false,
@@ -37,7 +46,16 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					error: 'No OAuth token'
 				});
 			}
-			const liveStream = await createLiveStream(token, event, peertubeHelpers);
+			const liveStream = await createPeerTubeLiveVideo({
+				channelId: cameraAssignment.channelId,
+				name: cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream',
+				description: cameraAssignment.streamDescription || '',
+				category: cameraAssignment.defaultStreamCategory,
+				privacy: cameraAssignment.privacyId,
+				oauthToken: token,
+				peertubeHelpers,
+				settingsManager
+			});
 			return res.status(200).json({
 				acknowledged: true,
 				message: 'Recording started',
@@ -55,8 +73,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 		}
 	});
 
-	// POST /recording-started-permanent
-	router.post('/recording-started-permanent', requireAuth, async (req, res) => {
+	// POST /recording-started-hudl
+	router.post('/recording-started-hudl', requireAuth, async (req, res) => {
 		const snifferId = req.snifferId;
 		const event = req.body || {};
 		if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
@@ -78,15 +96,105 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 		// Use or create a permanent live stream via PeerTube API, using sniffer context
 		try {
 			const { getOrCreatePermanentLiveStream } = require('./lib-peertube-api.js');
-			// Use snifferId as context, do not require a separate OAuth token
-			const liveStream = await getOrCreatePermanentLiveStream(snifferId, event, peertubeHelpers);
+			const { getMatchupKey, THUMBNAIL_DIR } = require('./lib-matchup-thumbnail.js');
+			const path = require('path');
+			const fs = require('fs');
+			const sniffers = (await storageManager.getData('sniffers')) || {};
+			const snifferToken = sniffers[snifferId] && sniffers[snifferId].oauthToken;
+			if (!snifferToken) {
+				return res.status(401).json({
+					acknowledged: false,
+					message: 'No PeerTube OAuth token found for sniffer',
+					error: 'No OAuth token'
+				});
+			}
+			// Look up camera assignment by cameraId
+			const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
+			const cameraAssignment = cameraAssignments[snifferId] && cameraAssignments[snifferId][event.cameraId];
+			if (!cameraAssignment) {
+				return res.status(404).json({
+					acknowledged: false,
+					message: 'Camera assignment not found',
+					error: 'No camera config'
+				});
+			}
+			const token = cameraAssignment.oauthToken;
+			if (!token) {
+				return res.status(401).json({
+					acknowledged: false,
+					message: 'No PeerTube OAuth token found for sniffer',
+					error: 'No OAuth token'
+				});
+			}
+			// Match correct game for the day using startTime (±15 minutes) and cameraId assignment
+			const schedules = (await storageManager.getData('hudl-schedules')) || {};
+			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+			let matchedGame = null;
+			let matchedTeamId = null;
+			let matchedChannelId = null;
+			let thumbnailPath = undefined;
+			let teamsToCheck = Object.entries(schedules);
+			// Filter teams by cameraId assignment if present
+			if (event.cameraId) {
+				// Find teams with cameraId assigned (hudlMappings[teamId].cameraId === event.cameraId)
+				const filtered = teamsToCheck.filter(([teamId, teamData]) => {
+					const mapping = hudlMappings[teamId];
+					return mapping && mapping.cameraId && mapping.cameraId === event.cameraId;
+				});
+				if (filtered.length > 0) {
+					teamsToCheck = filtered;
+				}
+				// If no teams have cameraId assigned, fallback to all teams
+			}
+			if (event.startTime) {
+				const eventTime = new Date(event.startTime).getTime();
+				const windowMs = 15 * 60 * 1000; // 15 minutes
+				for (const [teamId, teamData] of teamsToCheck) {
+					const games = teamData.games || [];
+					for (const game of games) {
+						if (!game.date) continue;
+						const gameTime = new Date(game.date).getTime();
+						if (Math.abs(gameTime - eventTime) <= windowMs) {
+							matchedGame = game;
+							matchedTeamId = teamId;
+							matchedChannelId = teamToChannel[teamId]?.channelId;
+							// Check for existing matchup thumbnail
+							if (game.homeTeamId && game.awayTeamId) {
+								const matchupKey = getMatchupKey(game.homeTeamId, game.awayTeamId);
+								const possiblePath = path.join(THUMBNAIL_DIR, matchupKey);
+								if (fs.existsSync(possiblePath)) {
+									thumbnailPath = possiblePath;
+								}
+							}
+							break;
+						}
+					}
+					if (matchedGame) break;
+				}
+			}
+			// Prepare camera assignment for permanent live stream
+			const assignmentForStream = {
+				cameraId: cameraAssignment.cameraId,
+				channelId: matchedChannelId || cameraAssignment.channelId,
+				streamTitle: matchedGame ? (matchedGame.title || matchedGame.name || cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream') : (cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream'),
+				streamDescription: matchedGame ? (matchedGame.description || cameraAssignment.streamDescription || '') : (cameraAssignment.streamDescription || ''),
+				defaultStreamCategory: cameraAssignment.defaultStreamCategory,
+				privacyId: cameraAssignment.privacyId,
+				thumbnailPath,
+				oauthToken: token
+			};
+			// Update permanent live video with matched game metadata and thumbnail, or fallback to camera config
+			const liveStream = await getOrCreatePermanentLiveStream(snifferId, cameraAssignment.cameraId, assignmentForStream, token, peertubeHelpers, storageManager);
 			return res.status(200).json({
 				acknowledged: true,
-				message: 'Using permanent live video',
-				streamId: liveStream.id,
+				message: matchedGame ? 'Using HUDL live video (matched game)' : 'Using HUDL live video (fallback config)',
+				streamId: liveStream.videoId,
 				liveStream,
-				isDuplicate: false,
-				permanent: true
+				isDuplicate: !liveStream.isNew,
+				hudl: true,
+				thumbnailUsed: thumbnailPath || null,
+				matchedGame: matchedGame || null,
+				matchedTeamId: matchedTeamId || null
 			});
 		} catch (err) {
 			return res.status(500).json({

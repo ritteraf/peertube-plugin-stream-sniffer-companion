@@ -114,32 +114,53 @@ async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManag
 
 // Helper: Create PeerTube live video
 async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, oauthToken, peertubeHelpers, settingsManager }) {
-	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-	const body = {
-		channelId,
-		name,
-		description,
-		category,
-		privacy,
-		permanentLive: true,
-		saveReplay: false
-	};
-	const res = await fetch(`${baseUrl}/api/v1/videos/live`, {
-		method: 'POST',
-		headers: {
-			'Authorization': `Bearer ${oauthToken}`,
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify(body)
-	});
-	if (!res.ok) throw new Error(`Failed to create permanent live: ${res.status} ${await res.text()}`);
-	const data = await res.json();
-	return {
-		id: data.video.id,
-		name: data.video.name,
-		rtmpUrl: data.rtmp.url,
-		streamKey: data.rtmp.streamKey
-	};
+		const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+		const body = {
+			channelId,
+			name,
+			description,
+			category,
+			privacy,
+			permanentLive: true,
+			saveReplay: false
+		};
+		const res = await fetch(`${baseUrl}/api/v1/videos/live`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${oauthToken}`,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(body)
+		});
+		if (!res.ok) throw new Error(`Failed to create permanent live: ${res.status} ${await res.text()}`);
+		const data = await res.json();
+
+		// If a thumbnailPath is provided, upload it as the video thumbnail
+		if (thumbnailPath) {
+			const fs = require('fs');
+			const FormData = require('form-data');
+			const form = new FormData();
+			form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
+			const patchRes = await fetch(`${baseUrl}/api/v1/videos/${data.video.id}/thumbnail`, {
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${oauthToken}`,
+					...form.getHeaders()
+				},
+				body: form
+			});
+			if (!patchRes.ok) {
+				// Log but do not throw, so stream creation still succeeds
+				console.warn(`[PLUGIN] Failed to upload thumbnail for video ${data.video.id}: ${patchRes.status} ${await patchRes.text()}`);
+			}
+		}
+
+		return {
+			id: data.video.id,
+			name: data.video.name,
+			rtmpUrl: data.rtmp.url,
+			streamKey: data.rtmp.streamKey
+		};
 }
 
 // Helper: Update camera assignment in storage
@@ -159,10 +180,10 @@ async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignm
 	try {
 		// STEP 1: Check if permanent live already exists
 		if (cameraAssignment.permanentLiveVideoId) {
-			const exists = await checkVideoExists(cameraAssignment.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers);
+			const exists = await checkVideoExists(cameraAssignment.permanentLiveVideoId, cameraAssignment.oauthToken, peertubeHelpers);
 			if (exists) {
 				// Get current title
-				const videoTitle = await getVideoTitle(cameraAssignment.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers);
+				const videoTitle = await getVideoTitle(cameraAssignment.permanentLiveVideoId, cameraAssignment.oauthToken, peertubeHelpers);
 				return {
 					videoId: cameraAssignment.permanentLiveVideoId,
 					rtmpUrl: cameraAssignment.permanentLiveRtmpUrl,
@@ -172,7 +193,7 @@ async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignm
 				};
 			} else {
 				// Clean up deleted video reference
-				await updateCameraAssignment(snifferId, cameraId, {
+				await updateCameraAssignment(snifferId, cameraAssignment.cameraId, {
 					permanentLiveVideoId: null,
 					permanentLiveRtmpUrl: null,
 					permanentLiveStreamKey: null
@@ -180,22 +201,25 @@ async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignm
 			}
 		}
 		// STEP 2: Create new permanent live video
-		const name = cameraAssignment.streamTitle || `${cameraId} - Live`;
-		const description = cameraAssignment.streamDescription || `Live stream from ${cameraId}`;
+		const name = cameraAssignment.streamTitle || `${cameraAssignment.cameraId} - Live`;
+		const description = cameraAssignment.streamDescription || `Live stream from ${cameraAssignment.cameraId}`;
 		const channelId = cameraAssignment.channelId;
 		const category = cameraAssignment.defaultStreamCategory;
 		const privacy = cameraAssignment.privacyId;
+		const thumbnailPath = cameraAssignment.thumbnailPath;
+		const oauthToken = cameraAssignment.oauthToken;
 		const newVideo = await createPeerTubeLiveVideo({
 			channelId,
 			name,
 			description,
 			category,
 			privacy,
-			oauthToken: peertubeOAuthToken,
-			peertubeHelpers
+			oauthToken,
+			peertubeHelpers,
+			thumbnailPath
 		});
 		// STEP 3: Store credentials in camera assignment
-		await updateCameraAssignment(snifferId, cameraId, {
+		await updateCameraAssignment(snifferId, cameraAssignment.cameraId, {
 			permanentLiveVideoId: newVideo.id,
 			permanentLiveRtmpUrl: newVideo.rtmpUrl,
 			permanentLiveStreamKey: newVideo.streamKey,

@@ -203,13 +203,14 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			   const cameras = await getCameraAssignments();
 			const assignments = cameras[snifferId] ? Object.values(cameras[snifferId]) : [];
 					   // ...existing code...
+			const pkg = require('./package.json');
 			return res.status(200).json({
 				snifferId,
 				cameraAssignments: assignments,
 				totalAssignments: assignments.length,
 				serverInfo: {
 					timestamp: new Date().toISOString(),
-					pluginVersion: '3.7.0'
+					pluginVersion: pkg.version
 				}
 			});
 		} catch (err) {
@@ -246,15 +247,32 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			// Add more field checks as needed
 		}
 		try {
-			   const cameras = await getCameraAssignments();
-			// Remove cameras not in new assignment list
+			const cameras = await getCameraAssignments();
+			// Build sets for new, deleted, and changed cameras
 			const newIds = new Set(assignments.map(a => a.cameraId));
-			const deleted = [];
+			const hudlPattern = /^rtmp:\/\/.*\/live\//;
+			// Find deleted, renamed, or changed-to-non-HUDL cameras
+			const affectedCameraIds = new Set();
 			if (cameras[snifferId]) {
 				for (const camId of Object.keys(cameras[snifferId])) {
+					const oldAssignment = cameras[snifferId][camId];
+					const newAssignment = assignments.find(a => a.cameraId === camId);
+					// Deleted: not in new list
 					if (!newIds.has(camId)) {
-						deleted.push(camId);
+						affectedCameraIds.add(camId);
 						delete cameras[snifferId][camId];
+						continue;
+					}
+					// Renamed: cameraId changed
+					if (newAssignment && oldAssignment.cameraId !== newAssignment.cameraId) {
+						affectedCameraIds.add(camId);
+						continue;
+					}
+					// Changed to non-HUDL: URL pattern no longer matches
+					if (newAssignment && oldAssignment.endpointPath && newAssignment.endpointPath &&
+						hudlPattern.test(oldAssignment.endpointPath) && !hudlPattern.test(newAssignment.endpointPath)) {
+						affectedCameraIds.add(camId);
+						continue;
 					}
 				}
 			} else {
@@ -265,7 +283,22 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 				cameras[snifferId][assignment.cameraId] = assignment;
 			}
 			await setCameraAssignments(cameras);
-					   // ...existing code...
+
+			// Auto-cleanup HUDL team mappings for affected cameras
+			if (storageManager) {
+				let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+				let updated = false;
+				for (const teamId in hudlMappings) {
+					const mapping = hudlMappings[teamId];
+					if (mapping && affectedCameraIds.has(mapping.cameraId)) {
+						mapping.cameraId = '';
+						updated = true;
+					}
+				}
+				if (updated) {
+					await storageManager.storeData('hudl-mappings', hudlMappings);
+				}
+			}
 			return res.status(200).json({
 				success: true,
 				message: 'Configuration saved successfully',

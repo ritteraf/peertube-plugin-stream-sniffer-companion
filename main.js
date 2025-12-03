@@ -1,12 +1,15 @@
 
 
-// Global process-level error handlers for debugging
-process.on('uncaughtException', err => {
-  console.error('[PLUGIN uncaughtException]', err);
-});
-process.on('unhandledRejection', err => {
-  console.error('[PLUGIN unhandledRejection]', err);
-});
+// Global process-level error handlers for debugging (guarded to avoid duplicate listeners)
+if (!global.__SN_SNIFFER_ERROR_HANDLERS__) {
+  process.on('uncaughtException', err => {
+    console.error('[PLUGIN uncaughtException]', err);
+  });
+  process.on('unhandledRejection', err => {
+    console.error('[PLUGIN unhandledRejection]', err);
+  });
+  global.__SN_SNIFFER_ERROR_HANDLERS__ = true;
+}
 
 const express = require('express');
 const routerIndex = require('./router-index.js');
@@ -14,6 +17,16 @@ const routerIndex = require('./router-index.js');
 async function register({ getRouter, registerSetting, settingsManager, storageManager, peertubeHelpers }) {
         // Get the plugin router instance from PeerTube
         const router = getRouter();
+
+        // Register HUDL cache staleness threshold setting (in seconds)
+        await registerSetting({
+          name: 'hudl_cache_staleness_threshold',
+          label: 'HUDL Cache Staleness Threshold (seconds)',
+          type: 'number',
+          default: 300, // 5 minutes
+          description: 'How old (in seconds) a team schedule cache can be before the plugin auto-refreshes it. Default: 300 (5 minutes).',
+          required: false
+        });
       // --- HUDL Auto-Refresh Logic ---
       const hudl = require('./lib-hudl-scraper.js');
       // Local getPluginSettings using injected settingsManager
@@ -45,14 +58,17 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
             console.log('[PLUGIN HUDL auto-refresh] HUDL org URL not configured, skipping refresh.');
             return;
           }
-          const school = await hudlLimiter.enqueue(() => hudl.fetchSchoolData(hudlOrgUrl, 'auto-refresh'));
+          let requestCount = 0;
+          const school = await hudlLimiter.enqueue(() => { requestCount++; return hudl.fetchSchoolData(hudlOrgUrl, 'auto-refresh'); });
           const teamHeaders = school.teamHeaders || [];
           let schedules = (await storageManager.getData('hudl-schedules')) || {};
+          let matchupCount = 0;
           for (const team of teamHeaders) {
             let games = [];
             let error = null;
             try {
-              games = await hudlLimiter.enqueue(() => hudl.fetchTeamSchedule(team.id, 'auto-refresh'));
+              games = await hudlLimiter.enqueue(() => { requestCount++; return hudl.fetchTeamSchedule(team.id, 'auto-refresh'); });
+              matchupCount += games.length;
             } catch (e) { error = e.message; }
             schedules[team.id] = {
               teamId: team.id,
@@ -65,10 +81,41 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
             if (error) {
               console.error(`[PLUGIN HUDL auto-refresh] Failed to refresh team ${team.name}:`, error);
             }
-            // No need for manual delay, limiter enforces delay
           }
           await storageManager.storeData('hudl-schedules', schedules);
           console.log(`[PLUGIN HUDL auto-refresh] Refreshed schedules for ${teamHeaders.length} teams at`, new Date().toISOString());
+          console.log(`[PLUGIN HUDL auto-refresh] Total HUDL API requests made in this run: ${requestCount}`);
+          console.log(`[PLUGIN HUDL auto-refresh] Matchups parsed: ${matchupCount}`);
+          // After storing schedules, trigger image generation in background
+          setImmediate(() => {
+            const { generateMatchupThumbnail } = require('./lib-matchup-thumbnail.js');
+            const fs = require('fs');
+            const path = require('path');
+            const { getMatchupKey, THUMBNAIL_DIR } = require('./lib-matchup-thumbnail.js');
+            let imageCacheHits = 0;
+            let imageGenerated = 0;
+            for (const team of teamHeaders) {
+              const games = schedules[team.id]?.games || [];
+              for (const g of games) {
+                const homeId = team.id || 'no_logo';
+                const homeLogo = team.logo || null;
+                const awayId = (g.opponentDetails && g.opponentDetails.schoolId) || 'no_logo';
+                const awayLogo = (g.opponentDetails && g.opponentDetails.profileImageUri) || null;
+                const matchupKey = getMatchupKey(homeId, awayId);
+                const thumbnailPath = path.join(THUMBNAIL_DIR, matchupKey);
+                if (fs.existsSync(thumbnailPath)) {
+                  imageCacheHits++;
+                } else {
+                  generateMatchupThumbnail(homeLogo, awayLogo, homeId, awayId)
+                    .then(() => { imageGenerated++; })
+                    .catch(thumbErr => {
+                      console.warn(`[PLUGIN HUDL] Failed to generate matchup thumbnail for ${homeId} vs ${awayId}:`, thumbErr.message);
+                    });
+                }
+              }
+            }
+            console.log(`[PLUGIN HUDL auto-refresh] Images generated: ${imageGenerated}, images already existed: ${imageCacheHits}`);
+          });
         } catch (err) {
           console.error('[PLUGIN HUDL auto-refresh] Error during auto-refresh:', err);
         }
@@ -90,7 +137,7 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
         await autoRefreshHudlSchedules(); // Initial run
         global.__HUDL_AUTO_REFRESH_INTERVAL_ID__ = setInterval(autoRefreshHudlSchedules, intervalMs);
         console.log(`[PLUGIN HUDL auto-refresh] Scheduled every ${intervalMs / 60000} minutes.`);
-      }, 10000); // Wait 10s after startup
+      }, 15 * 60 * 1000); // Wait 15 minutes after startup
     // DEBUG: Print HUDL org URL from settings on plugin startup
     // HUDL org URL debug print removed (was using readJson)
 
