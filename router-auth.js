@@ -98,15 +98,44 @@ module.exports = function createAuthRouter({ storageManager, settingsManager, pe
     const token = generateToken();
     const expiresAt = new Date(now + 3600 * 1000).toISOString();
 
-    // Register sniffer in persistent settings
+    // Register sniffer in persistent settings ONLY if OAuth token is obtained
     try {
       const sniffers = await getSnifferRegistry();
+      // Fetch OAuth token for the user
+      let oauthToken = null;
+      try {
+        const { getPeerTubeToken } = require('./lib-peertube-api.js');
+        oauthToken = await getPeerTubeToken({
+          username,
+          password,
+          peertubeHelpers,
+          settingsManager
+        });
+        if (oauthToken) {
+          console.log(`[PLUGIN AUTH] Successfully fetched and stored OAuth token for sniffer ${snifferId}.`);
+        } else {
+          console.warn(`[PLUGIN AUTH] No OAuth token received for sniffer ${snifferId}.`);
+        }
+      } catch (e) {
+        console.error('[PLUGIN AUTH] Failed to get PeerTube OAuth token for sniffer', snifferId, e.message);
+        return res.status(401).json({
+          error: 'INVALID_PEERTUBE_CREDENTIALS',
+          message: 'Failed to authenticate with PeerTube: ' + e.message
+        });
+      }
+      if (!oauthToken) {
+        return res.status(401).json({
+          error: 'INVALID_PEERTUBE_CREDENTIALS',
+          message: 'No OAuth token received from PeerTube.'
+        });
+      }
       sniffers[snifferId] = {
         snifferId,
         streamToken: token,
         tokenExpiresAt: expiresAt,
         peertubeUsername: username,
         peertubePassword: encrypt(password), // Encrypt before storing
+        oauthToken,
         lastSeen: new Date(now).toISOString(),
         systemInfo: systemInfo || {}
       };

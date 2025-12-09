@@ -25,7 +25,19 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			timestamp: new Date().toISOString()
 		});
 		await storageManager.storeData('recording-log', log);
-		// In production, create a new live stream via PeerTube API
+		// Stream token validation
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
+		const receivedToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
+		if (receivedToken !== expectedStreamToken) {
+			console.warn('[PLUGIN] 401: Stream token mismatch', { snifferId, receivedToken, expectedStreamToken });
+			return res.status(401).json({
+				acknowledged: false,
+				message: 'Invalid stream token',
+				error: 'Stream token mismatch'
+			});
+		}
 		try {
 			const { createPeerTubeLiveVideo } = require('./lib-peertube-api.js');
 			// Look up camera assignment by cameraId
@@ -38,24 +50,24 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					error: 'No camera config'
 				});
 			}
-			const token = cameraAssignment.oauthToken;
-			if (!token) {
-				return res.status(401).json({
-					acknowledged: false,
-					message: 'No PeerTube OAuth token found for sniffer',
-					error: 'No OAuth token'
-				});
-			}
-			const liveStream = await createPeerTubeLiveVideo({
-				channelId: cameraAssignment.channelId,
-				name: cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream',
-				description: cameraAssignment.streamDescription || '',
-				category: cameraAssignment.defaultStreamCategory,
-				privacy: cameraAssignment.privacyId,
-				oauthToken: token,
-				peertubeHelpers,
-				settingsManager
-			});
+			   const snifferToken = snifferEntry && snifferEntry.oauthToken;
+			   if (!snifferToken) {
+				   return res.status(401).json({
+					   acknowledged: false,
+					   message: 'No PeerTube OAuth token found for sniffer',
+					   error: 'No OAuth token'
+				   });
+			   }
+			   const liveStream = await createPeerTubeLiveVideo({
+				   channelId: cameraAssignment.channelId,
+				   name: cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream',
+				   description: cameraAssignment.streamDescription || '',
+				   category: cameraAssignment.defaultStreamCategory,
+				   privacy: cameraAssignment.privacyId,
+				   oauthToken: snifferToken,
+				   peertubeHelpers,
+				   settingsManager
+			   });
 			return res.status(200).json({
 				acknowledged: true,
 				message: 'Recording started',
@@ -75,16 +87,27 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 
 	// POST /recording-started-hudl
 	router.post('/recording-started-hudl', requireAuth, async (req, res) => {
-		const snifferId = req.snifferId;
-		const event = req.body || {};
-		if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
-			return res.status(400).json({
-				acknowledged: false,
-				message: 'Request body must be an object with cameraId (string)',
-				error: 'Invalid input'
-			});
-		}
-		       if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+			   const snifferId = req.snifferId;
+			   const event = req.body || {};
+			   const streamToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
+			   console.log('[PLUGIN HUDL] /recording-started-hudl called:', {
+				   snifferId,
+				   cameraId: event.cameraId,
+				   token: streamToken ? (typeof streamToken === 'string' ? streamToken.substring(0, 8) + '...' : streamToken) : null,
+				   event
+			   });
+		       if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
+			       console.warn('[PLUGIN HUDL] Invalid input for /recording-started-hudl:', event);
+			       return res.status(400).json({
+				       acknowledged: false,
+				       message: 'Request body must be an object with cameraId (string)',
+				       error: 'Invalid input'
+			       });
+		       }
+			       if (!storageManager) {
+			       console.error('[PLUGIN HUDL] storageManager not initialized');
+			       return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+		       }
 		       let log = (await storageManager.getData('recording-log')) || {};
 		       if (!log[snifferId]) log[snifferId] = [];
 		       log[snifferId].push({
@@ -99,33 +122,56 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			const { getMatchupKey, THUMBNAIL_DIR } = require('./lib-matchup-thumbnail.js');
 			const path = require('path');
 			const fs = require('fs');
-			const sniffers = (await storageManager.getData('sniffers')) || {};
-			const snifferToken = sniffers[snifferId] && sniffers[snifferId].oauthToken;
-			if (!snifferToken) {
-				return res.status(401).json({
-					acknowledged: false,
-					message: 'No PeerTube OAuth token found for sniffer',
-					error: 'No OAuth token'
-				});
-			}
+					 const sniffers = (await storageManager.getData('sniffers')) || {};
+					 const snifferEntry = sniffers[snifferId];
+					 const snifferOAuthToken = snifferEntry && snifferEntry.oauthToken;
+					 const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
+					 // Stream token validation (after expectedStreamToken is defined)
+					 if (streamToken !== expectedStreamToken) {
+						 console.warn('[PLUGIN HUDL] 401: Stream token mismatch', { snifferId, receivedToken: streamToken, expectedStreamToken });
+						 return res.status(401).json({
+							 acknowledged: false,
+							 message: 'Stream token mismatch',
+							 error: 'Invalid stream token'
+						 });
+					 }
+					 console.log('[PLUGIN HUDL] Recording start debug:', {
+						 snifferId,
+						 receivedToken: streamToken,
+						 expectedStreamToken,
+						 hasOAuthToken: !!snifferOAuthToken
+					 });
+					 if (!snifferOAuthToken) {
+						 console.warn('[PLUGIN HUDL] 401: No PeerTube OAuth token found for sniffer', { snifferId, sniffers: Object.keys(sniffers), snifferEntry });
+						 return res.status(401).json({
+							 acknowledged: false,
+							 message: 'No PeerTube OAuth token found for sniffer',
+							 error: 'No OAuth token',
+							 snifferId,
+							 snifferEntry
+						 });
+					 }
 			// Look up camera assignment by cameraId
-			const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
-			const cameraAssignment = cameraAssignments[snifferId] && cameraAssignments[snifferId][event.cameraId];
-			if (!cameraAssignment) {
-				return res.status(404).json({
-					acknowledged: false,
-					message: 'Camera assignment not found',
-					error: 'No camera config'
-				});
-			}
-			const token = cameraAssignment.oauthToken;
-			if (!token) {
-				return res.status(401).json({
-					acknowledged: false,
-					message: 'No PeerTube OAuth token found for sniffer',
-					error: 'No OAuth token'
-				});
-			}
+					       const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
+					       const cameraAssignment = cameraAssignments[snifferId] && cameraAssignments[snifferId][event.cameraId];
+					       if (!cameraAssignment) {
+						       console.warn('[PLUGIN HUDL] 404: Camera assignment not found', {
+							       snifferId,
+							       cameraId: event.cameraId,
+							       cameraAssignments: cameraAssignments[snifferId] || {},
+							       allAssignments: cameraAssignments
+						       });
+						       return res.status(404).json({
+							       acknowledged: false,
+							       message: 'Camera assignment not found',
+							       error: 'No camera config',
+							       snifferId,
+							       cameraId: event.cameraId,
+							       cameraAssignments: cameraAssignments[snifferId] || {},
+							       allAssignments: cameraAssignments
+						       });
+					       }
+						       // No need to check for cameraAssignment.oauthToken; always use snifferToken
 			// Match correct game for the day using startTime (±15 minutes) and cameraId assignment
 			const schedules = (await storageManager.getData('hudl-schedules')) || {};
 			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
@@ -181,10 +227,10 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				defaultStreamCategory: cameraAssignment.defaultStreamCategory,
 				privacyId: cameraAssignment.privacyId,
 				thumbnailPath,
-				oauthToken: token
+				oauthToken: snifferOAuthToken
 			};
 			// Update permanent live video with matched game metadata and thumbnail, or fallback to camera config
-			const liveStream = await getOrCreatePermanentLiveStream(snifferId, cameraAssignment.cameraId, assignmentForStream, token, peertubeHelpers, storageManager);
+			const liveStream = await getOrCreatePermanentLiveStream(snifferId, cameraAssignment.cameraId, assignmentForStream, snifferOAuthToken, peertubeHelpers, storageManager);
 			return res.status(200).json({
 				acknowledged: true,
 				message: matchedGame ? 'Using HUDL live video (matched game)' : 'Using HUDL live video (fallback config)',
@@ -197,10 +243,17 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				matchedTeamId: matchedTeamId || null
 			});
 		} catch (err) {
+			console.error('[PLUGIN HUDL] Error in /recording-started-hudl:', {
+				message: err.message,
+				stack: err.stack,
+				error: err
+			});
 			return res.status(500).json({
 				acknowledged: false,
 				message: 'Failed to start permanent live',
-				error: err.message
+				error: err.message,
+				stack: err.stack,
+				details: err
 			});
 		}
 	});
@@ -209,6 +262,18 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 	router.post('/recording-stopped', requireAuth, async (req, res) => {
 		const snifferId = req.snifferId;
 		const event = req.body || {};
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
+		const receivedToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
+		if (receivedToken !== expectedStreamToken) {
+			console.warn('[PLUGIN] 401: Stream token mismatch', { snifferId, receivedToken, expectedStreamToken });
+			return res.status(401).json({
+				acknowledged: false,
+				message: 'Invalid stream token',
+				error: 'Stream token mismatch'
+			});
+		}
 		if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
 			return res.status(400).json({
 				acknowledged: false,
@@ -216,15 +281,15 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				error: 'Invalid input'
 			});
 		}
-		       if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-		       let log = (await storageManager.getData('recording-log')) || {};
-		       if (!log[snifferId]) log[snifferId] = [];
-		       log[snifferId].push({
-			       type: 'stopped',
-			       ...event,
-			       timestamp: new Date().toISOString()
-		       });
-		       await storageManager.storeData('recording-log', log);
+		if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+		let log = (await storageManager.getData('recording-log')) || {};
+		if (!log[snifferId]) log[snifferId] = [];
+		log[snifferId].push({
+			type: 'stopped',
+			...event,
+			timestamp: new Date().toISOString()
+		});
+		await storageManager.storeData('recording-log', log);
 		return res.status(200).json({
 			acknowledged: true,
 			message: 'Recording stopped'

@@ -163,12 +163,30 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 	// GET /categories
 	router.get('/categories', requireAuth, async (req, res) => {
 		try {
-			const { getPeerTubeCategories } = require('./lib-peertube-api.js');
-			const categories = await getPeerTubeCategories({ peertubeHelpers });
-			return res.status(200).json({
-				categories,
-				message: `Found ${categories.length} categories`
-			});
+							       const fetch = require('node-fetch');
+							       let categories = [];
+							       let message = '';
+							       try {
+								       // Determine PeerTube base URL
+								       let baseUrl = null;
+								       if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
+									       baseUrl = peertubeHelpers.config.getWebserverUrl();
+								       }
+								       baseUrl = baseUrl || process.env.PEERTUBE_BASE_URL || '';
+								       if (!baseUrl) throw new Error('Cannot determine PeerTube base URL');
+								       const resPeerTube = await fetch(`${baseUrl}/api/v1/videos/categories`);
+								       if (!resPeerTube.ok) throw new Error(`Failed to fetch categories: ${resPeerTube.status}`);
+								       const raw = await resPeerTube.json();
+								       categories = Object.entries(raw).map(([id, label]) => ({ id: Number(id), label }));
+								       message = `Found ${categories.length} categories`;
+							       } catch (err) {
+								       message = `Exception fetching categories: ${err.message}`;
+								       console.error('[PLUGIN] /categories exception:', err);
+							       }
+							       return res.status(200).json({
+								       categories,
+								       message
+							       });
 		} catch (err) {
 			return res.status(500).json({
 				categories: [],
@@ -181,12 +199,30 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 	// GET /privacy-options
 	router.get('/privacy-options', requireAuth, async (req, res) => {
 		try {
-			const { getPeerTubePrivacyOptions } = require('./lib-peertube-api.js');
-			const privacies = await getPeerTubePrivacyOptions({ peertubeHelpers });
-			return res.status(200).json({
-				privacies,
-				message: `Found ${privacies.length} privacy options`
-			});
+						       const fetch = require('node-fetch');
+						       let privacies = [];
+						       let message = '';
+						       try {
+							       // Determine PeerTube base URL
+							       let baseUrl = null;
+							       if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
+								       baseUrl = peertubeHelpers.config.getWebserverUrl();
+							       }
+							       baseUrl = baseUrl || process.env.PEERTUBE_BASE_URL || '';
+							       if (!baseUrl) throw new Error('Cannot determine PeerTube base URL');
+							       const resPeerTube = await fetch(`${baseUrl}/api/v1/videos/privacies`);
+							       if (!resPeerTube.ok) throw new Error(`Failed to fetch privacy options: ${resPeerTube.status}`);
+							       const raw = await resPeerTube.json();
+							       privacies = Object.entries(raw).map(([id, name]) => ({ id: Number(id), name }));
+							       message = `Found ${privacies.length} privacy options`;
+						       } catch (err) {
+							       message = `Exception fetching privacy options: ${err.message}`;
+							       console.error('[PLUGIN] /privacy-options exception:', err);
+						       }
+						       return res.status(200).json({
+							       privacies,
+							       message
+						       });
 		} catch (err) {
 			return res.status(500).json({
 				privacies: [],
@@ -299,14 +335,13 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					await storageManager.storeData('hudl-mappings', hudlMappings);
 				}
 			}
-			return res.status(200).json({
-				success: true,
-				message: 'Configuration saved successfully',
-				snifferId,
-				timestamp: new Date().toISOString(),
-				assignmentsCreated: assignments.length,
-				permanentLivesDeleted: deleted
-			});
+			       return res.status(200).json({
+				       success: true,
+				       message: 'Configuration saved successfully',
+				       snifferId,
+				       timestamp: new Date().toISOString(),
+				       assignmentsCreated: assignments.length
+			       });
 		} catch (err) {
 			return res.status(500).json({ error: 'PLUGIN_CAMERA_SAVE_FAILED', message: err.message });
 		}
