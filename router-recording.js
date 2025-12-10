@@ -198,8 +198,23 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				for (const [teamId, teamData] of teamsToCheck) {
 					const games = teamData.games || [];
 					for (const game of games) {
-						if (!game.date) continue;
-						const gameTime = new Date(game.date).getTime();
+						// Use timeUtc if available, fallback to date for backwards compatibility
+						const gameTimeField = game.timeUtc || game.date;
+						if (!gameTimeField) continue;
+						
+						// Only match HOME games - camera cannot detect away games
+						// scheduleEntryLocation: 1 = HOME, 2 = AWAY, 0/3 = NEUTRAL (numeric enum from HUDL API)
+						if (game.scheduleEntryLocation !== undefined && game.scheduleEntryLocation !== 1) {
+							continue;
+						}
+						
+						// Skip games that have already been played
+						// scheduleEntryOutcome: 0 = not played, 1 = WIN, 2 = LOSS (numeric enum from HUDL API)
+						if (game.scheduleEntryOutcome !== undefined && game.scheduleEntryOutcome !== 0) {
+							continue;
+						}
+						
+						const gameTime = new Date(gameTimeField).getTime();
 						if (Math.abs(gameTime - eventTime) <= windowMs) {
 							matchedGame = game;
 							matchedTeamId = teamId;

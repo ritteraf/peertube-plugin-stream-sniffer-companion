@@ -347,6 +347,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 			const publicThumbnailBase = `/plugins/${pluginShortName}/${pluginVersion}/static/matchup-thumbnails`; // PeerTube static route
 			   teams = await Promise.all(teams.map(async team => {
 				   const mapping = hudlMappings[team.teamId] || {};
+				   const cameraId = mapping.cameraId || null;
 				   const channelId = mapping.channelId || null;
 				   const channelHandle = mapping.channelHandle || null;
 				   let channelName = null;
@@ -399,6 +400,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				   }
 				   return {
 					   ...team,
+					   cameraId,
 					   channelId,
 					   channelHandle,
 					   channelName,

@@ -101,7 +101,8 @@ module.exports = function createAuthRouter({ storageManager, settingsManager, pe
 
     // Register sniffer in persistent settings ONLY if OAuth token is obtained
     try {
-      const sniffers = await getSnifferRegistry();
+      // Get raw sniffer data WITHOUT auto-decrypting (we'll encrypt the new password ourselves)
+      const sniffers = (await storageManager.getData('sniffers')) || {};
       // Fetch OAuth token for the user
       let oauthToken = null;
       try {

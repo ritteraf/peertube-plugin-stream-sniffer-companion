@@ -123,23 +123,30 @@ async function checkVideoExists(videoId, oauthToken, peertubeHelpers, settingsMa
 		       const sniffers = (await storageManager.getData('sniffers')) || {};
 		       const snifferEntry = sniffers[snifferId];
 		       if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-			       const { decrypt } = require('./lib/secure-store.js');
-			       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-			       const decryptedPassword = decrypt(password);
-			       const newToken = await getPeerTubeToken({
-				       username: snifferEntry.peertubeUsername,
-				       password: decryptedPassword,
-				       peertubeHelpers,
-				       settingsManager
-			       });
-			       snifferEntry.oauthToken = newToken;
-			       sniffers[snifferId] = snifferEntry;
-			       await storageManager.storeData('sniffers', sniffers);
-			       peertubeHelpers.logger.info(`[checkVideoExists] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-			       // Retry with new token
-			       res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-				       headers: { 'Authorization': `Bearer ${newToken}` }
-			       });
+			       try {
+				       const { decrypt } = require('./lib/secure-store.js');
+				       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+				       const decryptedPassword = decrypt(password);
+				       const newToken = await getPeerTubeToken({
+					       username: snifferEntry.peertubeUsername,
+					       password: decryptedPassword,
+					       peertubeHelpers,
+					       settingsManager
+				       });
+				       snifferEntry.oauthToken = newToken;
+				       sniffers[snifferId] = snifferEntry;
+				       await storageManager.storeData('sniffers', sniffers);
+				       peertubeHelpers.logger.info(`[checkVideoExists] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+				       // Retry with new token
+				       res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+					       headers: { 'Authorization': `Bearer ${newToken}` }
+				       });
+			       } catch (decryptErr) {
+				       peertubeHelpers.logger.error(`[checkVideoExists] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+				       const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+				       error.code = 'REAUTH_REQUIRED';
+				       throw error;
+			       }
 		       }
 	       }
 	       return res.status === 200;
@@ -157,23 +164,30 @@ async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManag
 		       const sniffers = (await storageManager.getData('sniffers')) || {};
 		       const snifferEntry = sniffers[snifferId];
 		       if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-			       const { decrypt } = require('./lib/secure-store.js');
-			       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-			       const decryptedPassword = decrypt(password);
-			       const newToken = await getPeerTubeToken({
-				       username: snifferEntry.peertubeUsername,
-				       password: decryptedPassword,
-				       peertubeHelpers,
-				       settingsManager
-			       });
-			       snifferEntry.oauthToken = newToken;
-			       sniffers[snifferId] = snifferEntry;
-			       await storageManager.storeData('sniffers', sniffers);
-			       peertubeHelpers.logger.info(`[getVideoTitle] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-			       // Retry with new token
-			       res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-				       headers: { 'Authorization': `Bearer ${newToken}` }
-			       });
+			       try {
+				       const { decrypt } = require('./lib/secure-store.js');
+				       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+				       const decryptedPassword = decrypt(password);
+				       const newToken = await getPeerTubeToken({
+					       username: snifferEntry.peertubeUsername,
+					       password: decryptedPassword,
+					       peertubeHelpers,
+					       settingsManager
+				       });
+				       snifferEntry.oauthToken = newToken;
+				       sniffers[snifferId] = snifferEntry;
+				       await storageManager.storeData('sniffers', sniffers);
+				       peertubeHelpers.logger.info(`[getVideoTitle] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+				       // Retry with new token
+				       res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+					       headers: { 'Authorization': `Bearer ${newToken}` }
+				       });
+			       } catch (decryptErr) {
+				       peertubeHelpers.logger.error(`[getVideoTitle] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+				       const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+				       error.code = 'REAUTH_REQUIRED';
+				       throw error;
+			       }
 		       }
 	       }
 	       if (!res.ok) throw new Error(`Failed to fetch video title: ${res.status}`);
@@ -207,28 +221,35 @@ async function createPeerTubeLiveVideo({ channelId, name, description, category,
 			       const sniffers = (await storageManager.getData('sniffers')) || {};
 			       const snifferEntry = sniffers[snifferId];
 			       if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-				       const { decrypt } = require('./lib/secure-store.js');
-				       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-				       const decryptedPassword = decrypt(password);
-				       const newToken = await getPeerTubeToken({
-					       username: snifferEntry.peertubeUsername,
-					       password: decryptedPassword,
-					       peertubeHelpers,
-					       settingsManager
-				       });
-				       snifferEntry.oauthToken = newToken;
-				       sniffers[snifferId] = snifferEntry;
-				       await storageManager.storeData('sniffers', sniffers);
-				       peertubeHelpers.logger.info(`[createPeerTubeLiveVideo] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-				       // Retry with new token
-				       res = await fetch(`${baseUrl}/api/v1/videos/live`, {
-					       method: 'POST',
-					       headers: {
-						       'Authorization': `Bearer ${newToken}`,
-						       'Content-Type': 'application/json'
-					       },
-					       body: JSON.stringify(body)
-				       });
+				       try {
+					       const { decrypt } = require('./lib/secure-store.js');
+					       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+					       const decryptedPassword = decrypt(password);
+					       const newToken = await getPeerTubeToken({
+						       username: snifferEntry.peertubeUsername,
+						       password: decryptedPassword,
+						       peertubeHelpers,
+						       settingsManager
+					       });
+					       snifferEntry.oauthToken = newToken;
+					       sniffers[snifferId] = snifferEntry;
+					       await storageManager.storeData('sniffers', sniffers);
+					       peertubeHelpers.logger.info(`[createPeerTubeLiveVideo] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+					       // Retry with new token
+					       res = await fetch(`${baseUrl}/api/v1/videos/live`, {
+						       method: 'POST',
+						       headers: {
+							       'Authorization': `Bearer ${newToken}`,
+							       'Content-Type': 'application/json'
+						       },
+						       body: JSON.stringify(body)
+					       });
+				       } catch (decryptErr) {
+					       peertubeHelpers.logger.error(`[createPeerTubeLiveVideo] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+					       const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+					       error.code = 'REAUTH_REQUIRED';
+					       throw error;
+				       }
 	       }
 	       }
 	       if (!res.ok) throw new Error(`Failed to create permanent live: ${res.status} ${await res.text()}`);
@@ -386,24 +407,31 @@ async function deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager
 		const sniffers = (await storageManager.getData('sniffers')) || {};
 		const snifferEntry = sniffers[snifferId];
 		if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-			const { decrypt } = require('./lib/secure-store.js');
-			const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-			const decryptedPassword = decrypt(password);
-			const newToken = await getPeerTubeToken({
-				username: snifferEntry.peertubeUsername,
-				password: decryptedPassword,
-				peertubeHelpers,
-				settingsManager
-			});
-			snifferEntry.oauthToken = newToken;
-			sniffers[snifferId] = snifferEntry;
-			await storageManager.storeData('sniffers', sniffers);
-			peertubeHelpers.logger.info(`[deleteVideo] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-			// Retry with new token
-			res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-				method: 'DELETE',
-				headers: { 'Authorization': `Bearer ${newToken}` }
-			});
+			try {
+				const { decrypt } = require('./lib/secure-store.js');
+				const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+				const decryptedPassword = decrypt(password);
+				const newToken = await getPeerTubeToken({
+					username: snifferEntry.peertubeUsername,
+					password: decryptedPassword,
+					peertubeHelpers,
+					settingsManager
+				});
+				snifferEntry.oauthToken = newToken;
+				sniffers[snifferId] = snifferEntry;
+				await storageManager.storeData('sniffers', sniffers);
+				peertubeHelpers.logger.info(`[deleteVideo] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+				// Retry with new token
+				res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+					method: 'DELETE',
+					headers: { 'Authorization': `Bearer ${newToken}` }
+				});
+			} catch (decryptErr) {
+				peertubeHelpers.logger.error(`[deleteVideo] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+				const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+				error.code = 'REAUTH_REQUIRED';
+				throw error;
+			}
 		}
 	}
 	if (res.status === 204 || res.status === 404) {
