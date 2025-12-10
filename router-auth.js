@@ -96,7 +96,8 @@ module.exports = function createAuthRouter({ storageManager, settingsManager, pe
     // Do NOT verify PeerTube credentials here. Just store for later API calls.
     const now = Date.now();
     const token = generateToken();
-    const expiresAt = new Date(now + 3600 * 1000).toISOString();
+    // Stream token should have a long lifetime (1 year) - PeerTube OAuth token refresh is handled separately
+    const expiresAt = new Date(now + 365 * 24 * 3600 * 1000).toISOString();
 
     // Register sniffer in persistent settings ONLY if OAuth token is obtained
     try {

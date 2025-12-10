@@ -42,9 +42,30 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			const cameras = await getCameraAssignments();
 			const removed = cameras[snifferId] ? Object.keys(cameras[snifferId]) : [];
 			const endpoints = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.endpointPath) : [];
-			const permanentLivesDeleted = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
+			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
+			
+			// Get sniffer's OAuth token for PeerTube API calls
+			const sniffers = (await storageManager.getData('sniffers')) || {};
+			const snifferEntry = sniffers[snifferId];
+			const oauthToken = snifferEntry && snifferEntry.oauthToken;
+			
+			// Delete videos from PeerTube
+			const permanentLivesDeleted = [];
+			if (oauthToken && videoIdsToDelete.length > 0) {
+				const { deleteVideo } = require('./lib-peertube-api.js');
+				for (const videoId of videoIdsToDelete) {
+					try {
+						await deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+						permanentLivesDeleted.push(videoId);
+						peertubeHelpers.logger.info(`[DELETE /cameras] Deleted video ${videoId} from PeerTube`);
+					} catch (err) {
+						peertubeHelpers.logger.error(`[DELETE /cameras] Failed to delete video ${videoId}: ${err.message}`);
+					}
+				}
+			}
+			
 			cameras[snifferId] = {};
-					   await setCameraAssignments(cameras);
+			await setCameraAssignments(cameras);
 			return res.status(200).json({
 				deleted: removed.length,
 				camerasRemoved: removed,
@@ -73,10 +94,31 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 		try {
 			const cameras = await getCameraAssignments();
 			let endpoint = null;
+			let permanentLiveVideoId = null;
 			let permanentLiveDeleted = false;
+			
 			if (cameras[snifferId] && cameras[snifferId][cameraId]) {
 				endpoint = cameras[snifferId][cameraId].endpointPath;
-				permanentLiveDeleted = !!cameras[snifferId][cameraId].permanentLiveVideoId;
+				permanentLiveVideoId = cameras[snifferId][cameraId].permanentLiveVideoId;
+				
+				// Get sniffer's OAuth token and delete video from PeerTube
+				if (permanentLiveVideoId) {
+					const sniffers = (await storageManager.getData('sniffers')) || {};
+					const snifferEntry = sniffers[snifferId];
+					const oauthToken = snifferEntry && snifferEntry.oauthToken;
+					
+					if (oauthToken) {
+						const { deleteVideo } = require('./lib-peertube-api.js');
+						try {
+							await deleteVideo(permanentLiveVideoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+							permanentLiveDeleted = true;
+							peertubeHelpers.logger.info(`[DELETE /cameras/${cameraId}] Deleted video ${permanentLiveVideoId} from PeerTube`);
+						} catch (err) {
+							peertubeHelpers.logger.error(`[DELETE /cameras/${cameraId}] Failed to delete video ${permanentLiveVideoId}: ${err.message}`);
+						}
+					}
+				}
+				
 				delete cameras[snifferId][cameraId];
 				await setCameraAssignments(cameras);
 			}
@@ -85,7 +127,8 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 				cameraId,
 				endpoint,
 				message: 'Camera deleted',
-				permanentLiveDeleted
+				permanentLiveDeleted,
+				permanentLiveVideoId: permanentLiveDeleted ? permanentLiveVideoId : null
 			});
 		} catch (err) {
 			return res.status(500).json({ error: 'PLUGIN_CAMERA_DELETE_FAILED', message: err.message });
@@ -103,23 +146,46 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			});
 		}
 		try {
-			   const cameras = await getCameraAssignments();
-			   const deletedCameras = cameras[snifferId] ? Object.keys(cameras[snifferId]).length : 0;
-			   delete cameras[snifferId];
-			   await setCameraAssignments(cameras);
-			   // Remove sniffer credentials as well
-			   if (!storageManager) throw new Error('storageManager not initialized');
-			   let sniffers = (await storageManager.getData('sniffers')) || {};
-			   delete sniffers[snifferId];
-			   await storageManager.storeData('sniffers', sniffers);
+			const cameras = await getCameraAssignments();
+			const deletedCameras = cameras[snifferId] ? Object.keys(cameras[snifferId]).length : 0;
+			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
+			
+			// Get sniffer's OAuth token for PeerTube API calls
+			if (!storageManager) throw new Error('storageManager not initialized');
+			let sniffers = (await storageManager.getData('sniffers')) || {};
+			const snifferEntry = sniffers[snifferId];
+			const oauthToken = snifferEntry && snifferEntry.oauthToken;
+			
+			// Delete videos from PeerTube
+			const permanentLivesDeleted = [];
+			if (oauthToken && videoIdsToDelete.length > 0) {
+				const { deleteVideo } = require('./lib-peertube-api.js');
+				for (const videoId of videoIdsToDelete) {
+					try {
+						await deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+						permanentLivesDeleted.push(videoId);
+						peertubeHelpers.logger.info(`[POST /reset-all] Deleted video ${videoId} from PeerTube`);
+					} catch (err) {
+						peertubeHelpers.logger.error(`[POST /reset-all] Failed to delete video ${videoId}: ${err.message}`);
+					}
+				}
+			}
+			
+			delete cameras[snifferId];
+			await setCameraAssignments(cameras);
+			// Remove sniffer credentials as well
+			delete sniffers[snifferId];
+			await storageManager.storeData('sniffers', sniffers);
 			return res.status(200).json({
 				resetComplete: true,
 				deleted: {
 					cameras: deletedCameras,
 					oauthTokens: true,
 					encryptedCredentials: true,
-					registryEntry: true
+					registryEntry: true,
+					permanentLiveVideos: permanentLivesDeleted.length
 				},
+				permanentLivesDeleted,
 				reauthenticationRequired: true,
 				message: 'All data reset'
 			});

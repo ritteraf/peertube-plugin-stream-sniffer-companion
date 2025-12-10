@@ -58,9 +58,19 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
             console.log('[PLUGIN HUDL auto-refresh] HUDL org URL not configured, skipping refresh.');
             return;
           }
-          let requestCount = 0;
-          const school = await hudlLimiter.enqueue(() => { requestCount++; return hudl.fetchSchoolData(hudlOrgUrl, 'auto-refresh'); });
-          const teamHeaders = school.teamHeaders || [];
+        let requestCount = 0;
+        const school = await hudlLimiter.enqueue(() => { requestCount++; return hudl.fetchSchoolData(hudlOrgUrl, 'auto-refresh'); });
+        
+        // Store organization data for /organization endpoint
+        const orgData = {
+          name: school.fullName,
+          id: school.id,
+          orgURL: hudlOrgUrl,
+          lastScraped: new Date().toISOString()
+        };
+        await storageManager.storeData('hudl-organization', orgData);
+        
+        const teamHeaders = school.teamHeaders || [];
           let schedules = (await storageManager.getData('hudl-schedules')) || {};
           let matchupCount = 0;
           for (const team of teamHeaders) {

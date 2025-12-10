@@ -54,12 +54,22 @@ async function createPermanentLive(teamId, teamName, channelId, oauthToken) {
 
 // Delete a permanent live video for a team (calls PeerTube API, removes from hudl-schedules)
 
-async function deletePermanentLive(teamId, oauthToken) {
+async function deletePermanentLive(teamId, oauthToken, snifferId = null) {
 	if (!storageManager) throw new Error('storageManager not initialized');
 	let schedules = (await storageManager.getData('hudl-schedules')) || {};
 	if (!schedules[teamId] || !schedules[teamId].permanentLiveVideoId) return false;
 	const videoId = schedules[teamId].permanentLiveVideoId;
-	await peertubeApi.deleteVideo(videoId, oauthToken, peertubeHelpers);
+	
+	// Need settingsManager for deleteVideo
+	const settingsManager = { getSetting: async (key) => null }; // Minimal implementation
+	
+	try {
+		await peertubeApi.deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+	} catch (err) {
+		// Log but don't fail - still remove local reference
+		console.error(`[PLUGIN] Failed to delete video ${videoId} from PeerTube: ${err.message}`);
+	}
+	
 	delete schedules[teamId].permanentLiveVideoId;
 	delete schedules[teamId].permanentLiveRtmpUrl;
 	delete schedules[teamId].permanentLiveStreamKey;

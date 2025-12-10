@@ -89,64 +89,73 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 	// GET /hudl/organization
 	const hudl = require('./lib-hudl-scraper.js');
 	router.get('/organization', requireAuth, async (req, res) => {
-	       let hudlOrgUrl = '';
-	       if (settingsManager) {
-		       hudlOrgUrl = await settingsManager.getSetting('hudl-org-url');
-	       }
-	       if (!hudlOrgUrl && storageManager) {
-		       const settings = (await storageManager.getData('settings')) || {};
-		       hudlOrgUrl = settings['hudl-org-url'] || '';
-	       }
-	       hudlOrgUrl = hudlOrgUrl || process.env.HUDL_ORG_URL || '';
-	       if (!hudlOrgUrl) {
-		       return res.status(200).json({
-			       configured: false,
-			       message: 'HUDL organization URL not configured'
-		       });
-	       }
-			       try {
-				       const school = await hudlLimiter.enqueue(() => hudl.fetchSchoolData(hudlOrgUrl, req.snifferId));
-				       const org = {
-					       name: school.fullName,
-					       id: school.id,
-					       orgURL: hudlOrgUrl
-				       };
-				       // Load mappings from storage
-				       let hudlMappings = {};
-				       if (storageManager) {
-					       hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
-				       }
-				       const teams = (school.teamHeaders || []).map(team => {
-						       const mapping = hudlMappings[team.id];
-						       return {
-							       teamId: team.id,
-							       teamName: team.name,
-							       sport: team.sport,
-							       gender: team.gender,
-							       level: team.teamLevel,
-							       logoURL: team.logo,
-							       currentSeason: team.currentSeasonYear,
-							       mapped: !!mapping,
-							       channelId: mapping ? mapping.channelId : null,
-							       cameraId: mapping ? (typeof mapping.cameraId === 'string' ? mapping.cameraId : '') : '',
-							       permanentLiveVideoId: mapping ? mapping.permanentLiveVideoId || null : null,
-							       rtmpUrl: null,
-							       streamKey: null
-						       };
-				       });
-				       return res.status(200).json({
-					       configured: true,
-					       organization: org,
-					       teams,
-					       message: `Found ${teams.length} teams`
-				       });
-			       } catch (err) {
-				       return res.status(500).json({
-					       configured: false,
-					       message: 'Failed to fetch HUDL organization info',
-					       error: err.message
-				       });
-			       }
+		let hudlOrgUrl = '';
+		if (settingsManager) {
+			hudlOrgUrl = await settingsManager.getSetting('hudl-org-url');
+		}
+		if (!hudlOrgUrl && storageManager) {
+			const settings = (await storageManager.getData('settings')) || {};
+			hudlOrgUrl = settings['hudl-org-url'] || '';
+		}
+		hudlOrgUrl = hudlOrgUrl || process.env.HUDL_ORG_URL || '';
+		if (!hudlOrgUrl) {
+			return res.status(200).json({
+				configured: false,
+				message: 'HUDL organization URL not configured'
+			});
+		}
+
+		try {
+			// Load cached organization data from storage
+			const cachedOrg = (await storageManager.getData('hudl-organization')) || null;
+			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+			const hudlSchedules = (await storageManager.getData('hudl-schedules')) || {};
+
+			if (!cachedOrg) {
+				return res.status(200).json({
+					configured: true,
+					organization: null,
+					teams: [],
+					message: 'HUDL organization not yet scraped. Please refresh schedules.',
+					needsRefresh: true
+				});
+			}
+
+			// Build teams array from cached data
+			const teams = Object.values(hudlSchedules).map(schedule => {
+				const mapping = hudlMappings[schedule.teamId];
+				return {
+					teamId: schedule.teamId,
+					teamName: schedule.teamName,
+					sport: schedule.sport,
+					gender: schedule.gender || null,
+					level: schedule.level || null,
+					logoURL: schedule.logoURL || null,
+					currentSeason: schedule.currentSeason || null,
+					mapped: !!mapping,
+					channelId: mapping ? mapping.channelId : null,
+					cameraId: mapping ? (typeof mapping.cameraId === 'string' ? mapping.cameraId : '') : '',
+					permanentLiveVideoId: mapping ? mapping.permanentLiveVideoId || null : null,
+					rtmpUrl: null,
+					streamKey: null,
+					lastScraped: schedule.lastScraped || null
+				};
+			});
+
+			return res.status(200).json({
+				configured: true,
+				organization: cachedOrg,
+				teams,
+				message: `Found ${teams.length} teams`,
+				needsRefresh: false
+			});
+		} catch (err) {
+			return res.status(500).json({
+				configured: false,
+				message: 'Failed to load HUDL organization info from cache',
+				error: err.message
+			});
+		}
 	});
 
 	// POST /hudl/teams
@@ -453,11 +462,22 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		   setGlobalRefreshLock();
 		   setNextAutoRefreshAt();
 		   try {
-			   const schoolFetchStart = Date.now();
-			   log('Fetching school data...');
-			   const school = await hudlLimiter.enqueue(() => hudl.fetchSchoolData(hudlOrgUrl, req.snifferId));
-			   log('School data fetched', { durationMs: Date.now() - schoolFetchStart });
-			   const teamHeaders = school.teamHeaders || [];
+		   const schoolFetchStart = Date.now();
+		   log('Fetching school data...');
+		   const school = await hudlLimiter.enqueue(() => hudl.fetchSchoolData(hudlOrgUrl, req.snifferId));
+		   log('School data fetched', { durationMs: Date.now() - schoolFetchStart });
+		   
+		   // Store organization data for /organization endpoint
+		   const orgData = {
+			   name: school.fullName,
+			   id: school.id,
+			   orgURL: hudlOrgUrl,
+			   lastScraped: new Date().toISOString()
+		   };
+		   await storageManager.storeData('hudl-organization', orgData);
+		   log('Organization data cached');
+		   
+		   const teamHeaders = school.teamHeaders || [];
 			   let schedules = (await storageManager.getData('hudl-schedules')) || {};
 			   const results = [];
 			   for (const team of teamHeaders) {
