@@ -311,7 +311,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 	});
 
 	// GET /hudl/schedules
-	router.get('/schedules', requireAuth, async (req, res) => {
+	router.get('/schedules', async (req, res) => {
 		   // Serve cached schedule data only
 		   const { teamId } = req.query;
 		   try {
