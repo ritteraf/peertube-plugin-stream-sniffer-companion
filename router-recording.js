@@ -240,15 +240,15 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				streamTitle: matchedGame ? (matchedGame.title || matchedGame.name || cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream') : (cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream'),
 				streamDescription: matchedGame ? (matchedGame.description || cameraAssignment.streamDescription || '') : (cameraAssignment.streamDescription || ''),
 				defaultStreamCategory: cameraAssignment.defaultStreamCategory,
-				privacyId: cameraAssignment.privacyId,
-				thumbnailPath,
-				oauthToken: snifferOAuthToken
-			};
-			// Update permanent live video with matched game metadata and thumbnail, or fallback to camera config
-			const liveStream = await getOrCreatePermanentLiveStream(snifferId, cameraAssignment.cameraId, assignmentForStream, snifferOAuthToken, peertubeHelpers, storageManager);
-			return res.status(200).json({
-				acknowledged: true,
-				message: matchedGame ? 'Using HUDL live video (matched game)' : 'Using HUDL live video (fallback config)',
+			privacyId: cameraAssignment.privacyId,
+			thumbnailPath,
+			oauthToken: snifferOAuthToken
+		};
+		// Update permanent live video with matched game metadata and thumbnail, or fallback to camera config
+		const liveStream = await getOrCreatePermanentLiveStream(snifferId, cameraAssignment.cameraId, assignmentForStream, snifferOAuthToken, peertubeHelpers, settingsManager, storageManager);
+		return res.status(200).json({
+			acknowledged: true,
+			message: matchedGame ? 'Using HUDL live video (matched game)' : 'Using HUDL live video (fallback config)',
 				streamId: liveStream.videoId,
 				liveStream,
 				isDuplicate: !liveStream.isNew,

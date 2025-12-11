@@ -321,7 +321,7 @@ async function updateCameraAssignment(snifferId, cameraId, updates, storageManag
 }
 
 // Main function: getOrCreatePermanentLiveStream
-async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignment, peertubeOAuthToken, peertubeHelpers, storageManager) {
+async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignment, peertubeOAuthToken, peertubeHelpers, settingsManager, storageManager) {
 	try {
 	// STEP 1: Check if permanent live already exists
 	       if (cameraAssignment.permanentLiveVideoId) {
