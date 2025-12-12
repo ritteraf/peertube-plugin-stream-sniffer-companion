@@ -84,6 +84,8 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
               teamId: team.id,
               teamName: team.name,
               sport: team.sport,
+              gender: team.gender,
+              teamLevel: team.teamLevel,
               logoURL: team.logo,
               games,
               lastScraped: new Date().toISOString()
