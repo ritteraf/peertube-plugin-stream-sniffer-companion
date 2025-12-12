@@ -192,11 +192,14 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				}
 				// If no teams have cameraId assigned, fallback to all teams
 			}
-			if (event.startTime) {
-				const eventTime = new Date(event.startTime).getTime();
-				const windowMs = 15 * 60 * 1000; // 15 minutes
-				for (const [teamId, teamData] of teamsToCheck) {
-					const games = teamData.games || [];
+		if (event.startTime) {
+			const eventTime = new Date(event.startTime).getTime();
+			const earlyWindowMs = 15 * 60 * 1000; // 15 minutes before game start
+			const maxGameDurationMs = 3 * 60 * 60 * 1000; // 3 hours fallback for single games
+			const eventDate = new Date(event.startTime).setHours(0, 0, 0, 0);
+			
+			for (const [teamId, teamData] of teamsToCheck) {
+				const games = teamData.games || [];
 					for (const game of games) {
 						// Use timeUtc if available, fallback to date for backwards compatibility
 						const gameTimeField = game.timeUtc || game.date;
@@ -214,8 +217,35 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 							continue;
 						}
 						
-						const gameTime = new Date(gameTimeField).getTime();
-						if (Math.abs(gameTime - eventTime) <= windowMs) {
+						const gameStartTime = new Date(gameTimeField).getTime();
+						const gameDate = new Date(gameTimeField).setHours(0, 0, 0, 0);
+						
+						// Find next game scheduled for this team on the same day
+						let nextGameStartTime = null;
+						for (const nextGame of games) {
+							if (nextGame.id === game.id) continue;
+							const nextGameTime = new Date(nextGame.timeUtc || nextGame.date).getTime();
+							const nextGameDate = new Date(nextGame.timeUtc || nextGame.date).setHours(0, 0, 0, 0);
+							if (nextGameDate === gameDate && nextGameTime > gameStartTime) {
+								if (!nextGameStartTime || nextGameTime < nextGameStartTime) {
+									nextGameStartTime = nextGameTime;
+								}
+							}
+						}
+						
+						// Upper limit: next game start time, or game start + 3 hours
+						const upperLimit = nextGameStartTime || (gameStartTime + maxGameDurationMs);
+						
+						// Match if EITHER:
+						// 1. Within 15 minutes BEFORE game start (early detection)
+						// 2. OR (after game start, before upper limit, same day, not finished)
+						const isEarlyDetection = eventTime < gameStartTime && (gameStartTime - eventTime) <= earlyWindowMs;
+						const isInProgress = eventTime >= gameStartTime 
+						                     && eventTime < upperLimit
+						                     && gameDate === eventDate
+						                     && game.scheduleEntryOutcome === 0;
+						
+						if (isEarlyDetection || isInProgress) {
 							matchedGame = game;
 							matchedTeamId = teamId;
 							matchedChannelId = teamToChannel[teamId]?.channelId;
