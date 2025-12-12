@@ -70,6 +70,9 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
         };
         await storageManager.storeData('hudl-organization', orgData);
         
+        // Import shared title generator
+        const { generateGameTitle } = require('./lib-game-title.js');
+        
         const teamHeaders = school.teamHeaders || [];
           let schedules = (await storageManager.getData('hudl-schedules')) || {};
           let matchupCount = 0;
@@ -79,6 +82,17 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
             try {
               games = await hudlLimiter.enqueue(() => { requestCount++; return hudl.fetchTeamSchedule(team.id, 'auto-refresh'); });
               matchupCount += games.length;
+              
+              // Add generated title to each game
+              const teamData = {
+                sport: team.sport,
+                gender: team.gender,
+                teamLevel: team.teamLevel
+              };
+              games = games.map(game => ({
+                ...game,
+                generatedTitle: generateGameTitle(game, teamData, school.fullName)
+              }));
             } catch (e) { error = e.message; }
             schedules[team.id] = {
               teamId: team.id,

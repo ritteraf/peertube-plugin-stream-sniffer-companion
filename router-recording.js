@@ -263,11 +263,24 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					if (matchedGame) break;
 				}
 			}
+			
+			// Import shared title generator
+			const { generateGameTitle } = require('./lib-game-title.js');
+			
+			// Get school name and team data for matched game to generate title
+			let generatedTitle = null;
+			if (matchedGame && matchedTeamId) {
+				const orgData = (await storageManager.getData('hudl-organization')) || {};
+				const schoolName = orgData.name || null;
+				const teamData = schedules[matchedTeamId];
+				generatedTitle = generateGameTitle(matchedGame, teamData, schoolName);
+			}
+			
 			// Prepare camera assignment for permanent live stream
 			const assignmentForStream = {
 				cameraId: cameraAssignment.cameraId,
 				channelId: matchedChannelId || cameraAssignment.channelId,
-				streamTitle: matchedGame ? (matchedGame.title || matchedGame.name || cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream') : (cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream'),
+				streamTitle: generatedTitle || cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream',
 				streamDescription: matchedGame ? (matchedGame.description || cameraAssignment.streamDescription || '') : (cameraAssignment.streamDescription || ''),
 				defaultStreamCategory: cameraAssignment.defaultStreamCategory,
 			privacyId: cameraAssignment.privacyId,
