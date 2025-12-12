@@ -131,23 +131,119 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
         }
       }
 
+      // Calculate next refresh time based on game schedule (adaptive scheduling)
+      async function calculateNextRefreshTime() {
+        try {
+          const schedules = (await storageManager.getData('hudl-schedules')) || {};
+          const now = Date.now();
+          const today = new Date().setHours(0, 0, 0, 0);
+          
+          // Get all unplayed games for today across all teams
+          let todaysGames = [];
+          for (const teamId in schedules) {
+            const games = schedules[teamId].games || [];
+            for (const game of games) {
+              const gameTimeField = game.timeUtc || game.date;
+              if (!gameTimeField) continue;
+              const gameTime = new Date(gameTimeField);
+              const gameDate = new Date(gameTime).setHours(0, 0, 0, 0);
+              // Only include HOME games not yet played
+              if (gameDate === today 
+                  && game.scheduleEntryLocation === 1 
+                  && game.scheduleEntryOutcome === 0) {
+                todaysGames.push(gameTime.getTime());
+              }
+            }
+          }
+          
+          // Sort games chronologically
+          todaysGames.sort((a, b) => a - b);
+          
+          // NO GAMES TODAY - minimal refresh schedule
+          if (todaysGames.length === 0) {
+            const noon = new Date().setHours(12, 0, 0, 0);
+            const midnight = new Date().setHours(24, 0, 0, 0);
+            
+            if (now < noon) {
+              const minutesUntilNoon = Math.max(5, (noon - now) / 60000);
+              console.log(`[PLUGIN HUDL auto-refresh] No games today. Next refresh at noon (in ${Math.round(minutesUntilNoon)} minutes).`);
+              return minutesUntilNoon;
+            } else {
+              const minutesUntilMidnight = Math.max(5, (midnight - now) / 60000);
+              console.log(`[PLUGIN HUDL auto-refresh] No games today. Next refresh at midnight (in ${Math.round(minutesUntilMidnight)} minutes).`);
+              return minutesUntilMidnight;
+            }
+          }
+          
+          // GAMES TODAY - aggressive refresh schedule
+          const firstGame = todaysGames[0];
+          const lastGame = todaysGames[todaysGames.length - 1];
+          const twoHoursBeforeFirst = firstGame - (2 * 60 * 60 * 1000);
+          const threeHoursAfterLast = lastGame + (3 * 60 * 60 * 1000);
+          
+          // Before game window starts: refresh 2 hours before first game
+          if (now < twoHoursBeforeFirst) {
+            const minutesUntil = Math.max(5, (twoHoursBeforeFirst - now) / 60000);
+            console.log(`[PLUGIN HUDL auto-refresh] ${todaysGames.length} game(s) today. Next refresh 2 hours before first game (in ${Math.round(minutesUntil)} minutes).`);
+            return minutesUntil;
+          }
+          
+          // During game window (2hr before first → 3hr after last): every 30 min
+          if (now >= twoHoursBeforeFirst && now < threeHoursAfterLast) {
+            console.log(`[PLUGIN HUDL auto-refresh] GAME DAY ACTIVE - ${todaysGames.length} game(s) today. Polling every 30 minutes.`);
+            return 30; // 30 minutes
+          }
+          
+          // After all games done: back to midnight refresh
+          const midnight = new Date().setHours(24, 0, 0, 0);
+          const minutesUntilMidnight = Math.max(5, (midnight - now) / 60000);
+          console.log(`[PLUGIN HUDL auto-refresh] All games complete. Next refresh at midnight (in ${Math.round(minutesUntilMidnight)} minutes).`);
+          return minutesUntilMidnight;
+        } catch (err) {
+          console.error('[PLUGIN HUDL auto-refresh] Error calculating next refresh time:', err);
+          return 60; // Fallback to 60 minutes on error
+        }
+      }
+
+      // Dynamic refresh scheduler
+      async function scheduleNextRefresh() {
+        // Clear any existing timeout
+        if (global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__) {
+          clearTimeout(global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__);
+          global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__ = null;
+        }
+        
+        // Calculate next refresh time
+        const minutesUntilNext = await calculateNextRefreshTime();
+        const msUntilNext = minutesUntilNext * 60 * 1000;
+        
+        // Schedule next refresh
+        global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__ = setTimeout(async () => {
+          await autoRefreshHudlSchedules();
+          await scheduleNextRefresh(); // Reschedule after completion
+        }, msUntilNext);
+        
+        console.log(`[PLUGIN HUDL auto-refresh] Next refresh scheduled in ${Math.round(minutesUntilNext)} minutes.`);
+      }
+
       // Ensure only one HUDL auto-refresh interval is active at a time
       if (global.__HUDL_AUTO_REFRESH_INTERVAL_ID__) {
         clearInterval(global.__HUDL_AUTO_REFRESH_INTERVAL_ID__);
         global.__HUDL_AUTO_REFRESH_INTERVAL_ID__ = null;
         console.log('[PLUGIN HUDL auto-refresh] Cleared previous auto-refresh interval.');
       }
+      if (global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__) {
+        clearTimeout(global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__);
+        global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__ = null;
+        console.log('[PLUGIN HUDL auto-refresh] Cleared previous auto-refresh timeout.');
+      }
+      
+      // Start adaptive refresh system after 5 minute delay
       setTimeout(async () => {
-        let intervalMs = 60 * 60 * 1000; // default 60 min
-        try {
-          const settings = await getPluginSettings();
-          const min = parseInt(settings['schedule-cache-minutes'], 10);
-          if (!isNaN(min) && min > 0) intervalMs = min * 60 * 1000;
-        } catch {}
+        console.log('[PLUGIN HUDL auto-refresh] Starting adaptive refresh system...');
         await autoRefreshHudlSchedules(); // Initial run
-        global.__HUDL_AUTO_REFRESH_INTERVAL_ID__ = setInterval(autoRefreshHudlSchedules, intervalMs);
-        console.log(`[PLUGIN HUDL auto-refresh] Scheduled every ${intervalMs / 60000} minutes.`);
-      }, 15 * 60 * 1000); // Wait 15 minutes after startup
+        await scheduleNextRefresh(); // Schedule next based on game schedule
+      }, 5 * 60 * 1000); // Wait 5 minutes after startup
     // DEBUG: Print HUDL org URL from settings on plugin startup
     // HUDL org URL debug print removed (was using readJson)
 
