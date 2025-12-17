@@ -245,11 +245,11 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						                     && gameDate === eventDate
 						                     && game.scheduleEntryOutcome === 0;
 						
-						if (isEarlyDetection || isInProgress) {
-							matchedGame = game;
-							matchedTeamId = teamId;
-							matchedChannelId = teamToChannel[teamId]?.channelId;
-							// Check for existing matchup thumbnail
+					if (isEarlyDetection || isInProgress) {
+						matchedGame = game;
+						matchedTeamId = teamId;
+						matchedChannelId = hudlMappings[teamId]?.channelId;
+						// Check for existing matchup thumbnail
 							if (game.homeTeamId && game.awayTeamId) {
 								const matchupKey = getMatchupKey(game.homeTeamId, game.awayTeamId);
 								const possiblePath = path.join(THUMBNAIL_DIR, matchupKey);
