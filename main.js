@@ -11,7 +11,6 @@ if (!global.__SN_SNIFFER_ERROR_HANDLERS__) {
   global.__SN_SNIFFER_ERROR_HANDLERS__ = true;
 }
 
-const express = require('express');
 const routerIndex = require('./router-index.js');
 
 async function register({ getRouter, registerSetting, settingsManager, storageManager, peertubeHelpers }) {

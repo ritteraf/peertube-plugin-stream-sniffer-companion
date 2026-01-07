@@ -1,7 +1,7 @@
 {
   "name": "peertube-plugin-stream-sniffer-companion",
   "description": "PeerTube plugin Stream Sniffer Companion",
-  "version": "0.2.67",
+  "version": "0.2.71",
   "author": "ritteraf",
   "bugs": "https://framagit.org/framasoft/peertube/peertube-plugin-quickstart/issues",
   "clientScripts": [
@@ -36,6 +36,7 @@
     "fr-FR": "./languages/fr.json"
   },
   "dependencies": {
+    "express": "^4.18.2",
     "form-data": "^4.0.5",
     "node-fetch": "^2.6.7",
     "sharp": "^0.34.5"

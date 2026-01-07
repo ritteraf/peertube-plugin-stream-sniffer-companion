@@ -195,8 +195,38 @@ async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManag
 	       return data.name;
 }
 
+// Helper: Parse tags from HUDL team data
+// gender: "MENS", "WOMENS", "COED", or null
+// teamLevel: "VARSITY", "JUNIOR_VARSITY", "FRESHMAN", "OTHER", or null
+function parseTeamTags(gender, teamLevel, sport) {
+	const tags = [];
+	
+	// Gender tags (match sniffer's displayGender conversion)
+	if (gender === 'MENS') tags.push('Boys');
+	else if (gender === 'WOMENS') tags.push('Girls');
+	else if (gender === 'COED') tags.push('Coed');
+	
+	// Level tags (match sniffer's displayLevel conversion)
+	if (teamLevel === 'VARSITY') tags.push('Varsity');
+	else if (teamLevel === 'JUNIOR_VARSITY') tags.push('JV');
+	else if (teamLevel === 'FRESHMAN') tags.push('Freshman');
+	// Skip "OTHER" - team name usually contains level
+	
+	// Sport tag
+	if (sport) tags.push(sport);
+	
+	// Generic tags
+	tags.push('Live');
+	tags.push('Game');
+	
+	return tags;
+}
+
 // Helper: Create PeerTube live video
-async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null }) {
+// Note: PeerTube licence IDs: 1=Attribution, 2=Attribution-ShareAlike, 3=Attribution-NoDerivs,
+//       4=Attribution-NonCommercial, 5=Attribution-NonCommercial-ShareAlike,
+//       6=Attribution-NonCommercial-NoDerivs, 7=Public Domain Dedication
+async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, tags, language, licence, commentsEnabled, downloadEnabled, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null }) {
 		       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
 		       const body = {
 			       channelId,
@@ -207,6 +237,14 @@ async function createPeerTubeLiveVideo({ channelId, name, description, category,
 			       permanentLive: true,
 		       saveReplay: false
 	       };
+	       
+	       // Optional fields
+	       if (tags && Array.isArray(tags) && tags.length > 0) body.tags = tags;
+	       if (language) body.language = language;
+	       if (licence !== undefined) body.licence = licence;
+	       if (commentsEnabled !== undefined) body.commentsEnabled = commentsEnabled;
+	       if (downloadEnabled !== undefined) body.downloadEnabled = downloadEnabled;
+	       
 		       let res = await fetch(`${baseUrl}/api/v1/videos/live`, {
 			       method: 'POST',
 			       headers: {
@@ -320,45 +358,129 @@ async function updateCameraAssignment(snifferId, cameraId, updates, storageManag
 	await storageManager.storeData('camera-assignments', cameras);
 }
 
-// Main function: getOrCreatePermanentLiveStream
-async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignment, peertubeOAuthToken, peertubeHelpers, settingsManager, storageManager) {
+// Main function: getOrCreatePermanentLiveStream (now team-based)
+async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, peertubeOAuthToken, peertubeHelpers, settingsManager, storageManager) {
 	try {
-	// STEP 1: Check if permanent live already exists
-	       if (cameraAssignment.permanentLiveVideoId) {
-		       const exists = await checkVideoExists(cameraAssignment.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+	// STEP 1: Check if permanent live already exists for this team
+	       if (teamSettings.permanentLiveVideoId) {
+		       const exists = await checkVideoExists(teamSettings.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
 		       if (exists) {
 			       // Get current title
-			       const videoTitle = await getVideoTitle(cameraAssignment.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
-				       return {
-					       videoId: cameraAssignment.permanentLiveVideoId,
-					       rtmpUrl: cameraAssignment.permanentLiveRtmpUrl,
-					       streamKey: cameraAssignment.permanentLiveStreamKey,
+			       const videoTitle = await getVideoTitle(teamSettings.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+			       
+			       // Update video metadata (title, description, category, privacy, tags, language, licence) if provided
+			       const updateData = {};
+			       if (teamSettings.streamTitle) updateData.name = teamSettings.streamTitle;
+			       if (teamSettings.streamDescription !== undefined) updateData.description = teamSettings.streamDescription;
+			       if (teamSettings.category !== undefined) updateData.category = teamSettings.category;
+			       if (teamSettings.privacy !== undefined) updateData.privacy = teamSettings.privacy;
+			       if (teamSettings.tags && Array.isArray(teamSettings.tags) && teamSettings.tags.length > 0) updateData.tags = teamSettings.tags;
+			       if (teamSettings.language) updateData.language = teamSettings.language;
+			       if (teamSettings.licence !== undefined) updateData.licence = teamSettings.licence;
+			       
+			       if (Object.keys(updateData).length > 0) {
+				       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+				       const updateRes = await fetch(`${baseUrl}/api/v1/videos/${teamSettings.permanentLiveVideoId}`, {
+					       method: 'PUT',
+					       headers: {
+						       'Authorization': `Bearer ${peertubeOAuthToken}`,
+						       'Content-Type': 'application/json'
+					       },
+					       body: JSON.stringify(updateData)
+				       });
+				       if (!updateRes.ok) {
+					       console.warn(`[PLUGIN] Failed to update metadata for video ${teamSettings.permanentLiveVideoId}: ${updateRes.status} ${await updateRes.text()}`);
+				       } else {
+					       console.log(`[PLUGIN] Updated metadata for video ${teamSettings.permanentLiveVideoId}:`, updateData);
+				       }
+			       }
+			       
+			       // Update thumbnail if provided (for HUDL game matching)
+			       const thumbnailPath = teamSettings.thumbnailPath;
+			       if (typeof thumbnailPath === 'string' && thumbnailPath.length > 0) {
+				       const fs = require('fs');
+				       const FormData = require('form-data');
+				       const form = new FormData();
+				       form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
+				       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+				       const patchRes = await fetch(`${baseUrl}/api/v1/videos/${teamSettings.permanentLiveVideoId}/thumbnail`, {
+					       method: 'POST',
+					       headers: {
+						       'Authorization': `Bearer ${peertubeOAuthToken}`,
+						       ...form.getHeaders()
+					       },
+					       body: form
+				       });
+				       if (!patchRes.ok) {
+					       console.warn(`[PLUGIN] Failed to upload thumbnail for existing video ${teamSettings.permanentLiveVideoId}: ${patchRes.status} ${await patchRes.text()}`);
+				       } else {
+					       console.log(`[PLUGIN] Updated thumbnail for existing video ${teamSettings.permanentLiveVideoId}`);
+				       }
+			       }
+			       		       // Check if playlist exists for this season
+								if (teamSettings.seasonYear) {
+									if (!teamSettings.seasons) {
+										teamSettings.seasons = {};
+									}
+									const seasonData = teamSettings.seasons[teamSettings.seasonYear];
+									if (!seasonData || !seasonData.playlistId) {
+										// Create new playlist for this season
+										const nextYear = parseInt(teamSettings.seasonYear) + 1;
+										const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
+										const newPlaylist = await createPlaylist({
+											channelId: teamSettings.channelId,
+											displayName: playlistDisplayName,
+											description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
+											privacy: teamSettings.privacy,
+											oauthToken: peertubeOAuthToken,
+											peertubeHelpers,
+											settingsManager
+										});
+										teamSettings.seasons[teamSettings.seasonYear] = {
+											seasonYear: teamSettings.seasonYear,
+											playlistId: newPlaylist.playlistId,
+											playlistName: newPlaylist.displayName
+										};
+										await updateTeamPermanentLive(snifferId, teamId, {
+											seasons: teamSettings.seasons
+										}, storageManager);
+									}
+								}
+		       				       return {
+					       videoId: teamSettings.permanentLiveVideoId,
+					       rtmpUrl: teamSettings.permanentLiveRtmpUrl,
+					       streamKey: teamSettings.permanentLiveStreamKey,
 					       isNew: false,
-					       videoTitle
+					       videoTitle: teamSettings.streamTitle || videoTitle
 				       };
 			       } else {
 				// Clean up deleted video reference
-				await updateCameraAssignment(snifferId, cameraAssignment.cameraId, {
+				await updateTeamPermanentLive(snifferId, teamId, {
 					permanentLiveVideoId: null,
 					permanentLiveRtmpUrl: null,
 					permanentLiveStreamKey: null
 				}, storageManager);
 			}
 		}
-	// STEP 2: Create new permanent live video
-	const name = cameraAssignment.streamTitle || `${cameraAssignment.cameraId} - Live`;
-	const description = cameraAssignment.streamDescription || `Live stream from ${cameraAssignment.cameraId}`;
-	const channelId = cameraAssignment.channelId;
-	const category = cameraAssignment.defaultStreamCategory;
-	const privacy = cameraAssignment.privacyId;
-	// Ensure thumbnailPath is always defined
-	const thumbnailPath = typeof cameraAssignment.thumbnailPath !== 'undefined' ? cameraAssignment.thumbnailPath : undefined;
+	// STEP 2: Create new permanent live video for this team
+	const name = teamSettings.streamTitle || `${teamSettings.teamName} - Live`;
+	const description = teamSettings.streamDescription || `Live stream for ${teamSettings.teamName}`;
+	const channelId = teamSettings.channelId;
+	const category = teamSettings.category;
+	const privacy = teamSettings.privacy;
+	const tags = teamSettings.tags;
+	const language = teamSettings.language;
+	const licence = teamSettings.licence;
+	const thumbnailPath = typeof teamSettings.thumbnailPath !== 'undefined' ? teamSettings.thumbnailPath : undefined;
 		const newVideo = await createPeerTubeLiveVideo({
 			channelId,
 			name,
 			description,
 			category,
 			privacy,
+			tags,
+			language,
+			licence,
 			oauthToken: peertubeOAuthToken,
 			peertubeHelpers,
 			settingsManager,
@@ -374,14 +496,43 @@ async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignm
 				console.error('[PLUGIN] PeerTube live video API response missing rtmpUrl or streamKey:', newVideo);
 				throw new Error('PeerTube live video API response missing rtmpUrl or streamKey');
 			}
-		// STEP 3: Store credentials in camera assignment
-		await updateCameraAssignment(snifferId, cameraAssignment.cameraId, {
+		// STEP 3: Store credentials in team mapping
+		await updateTeamPermanentLive(snifferId, teamId, {
 			permanentLiveVideoId: newVideo.id,
 			permanentLiveRtmpUrl: newVideo.rtmpUrl,
 			permanentLiveStreamKey: newVideo.streamKey,
 			permanentLiveCreatedAt: new Date().toISOString()
-		}, storageManager);
-		// STEP 4: Return new credentials
+		}, storageManager);	
+	// Check if playlist exists for this season
+	if (teamSettings.seasonYear) {
+		if (!teamSettings.seasons) {
+			teamSettings.seasons = {};
+		}
+		const seasonData = teamSettings.seasons[teamSettings.seasonYear];
+		if (!seasonData || !seasonData.playlistId) {
+			// Create new playlist for this season
+			const nextYear = parseInt(teamSettings.seasonYear) + 1;
+			const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
+			const newPlaylist = await createPlaylist({
+				channelId: teamSettings.channelId,
+				displayName: playlistDisplayName,
+				description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
+				privacy: teamSettings.privacy,
+				oauthToken: peertubeOAuthToken,
+				peertubeHelpers,
+				settingsManager
+			});
+			teamSettings.seasons[teamSettings.seasonYear] = {
+				seasonYear: teamSettings.seasonYear,
+				playlistId: newPlaylist.playlistId,
+				playlistName: newPlaylist.displayName
+			};
+			await updateTeamPermanentLive(snifferId, teamId, {
+				seasons: teamSettings.seasons
+			}, storageManager);
+		}
+	}
+			// STEP 4: Return new credentials
 		return {
 			videoId: newVideo.id,
 			rtmpUrl: newVideo.rtmpUrl,
@@ -390,8 +541,18 @@ async function getOrCreatePermanentLiveStream(snifferId, cameraId, cameraAssignm
 			videoTitle: newVideo.name
 		};
 	} catch (err) {
-		throw new Error(`Failed to get or create permanent live stream: ${err.message}`);
+		throw new Error(`Failed to get or create permanent live stream for team: ${err.message}`);
 	}
+}
+
+// Helper: Update team's permanent live video credentials in hudl-mappings
+async function updateTeamPermanentLive(snifferId, teamId, updates, storageManager) {
+	const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+	if (!hudlMappings[teamId]) {
+		throw new Error(`Team ${teamId} not found in hudl-mappings`);
+	}
+	Object.assign(hudlMappings[teamId], updates);
+	await storageManager.storeData('hudl-mappings', hudlMappings);
 }
 
 // Helper: Delete a video from PeerTube
@@ -444,6 +605,57 @@ async function deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager
 	return true;
 }
 
+// Helper: Create a PeerTube playlist
+async function createPlaylist({ channelId, displayName, description, privacy, oauthToken, peertubeHelpers, settingsManager }) {
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	const body = {
+		displayName,
+		privacy: privacy || 1, // Default to public
+		videoChannelId: channelId
+	};
+	if (description) body.description = description;
+	
+	const res = await fetch(`${baseUrl}/api/v1/video-playlists`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${oauthToken}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(body)
+	});
+	
+	if (!res.ok) {
+		throw new Error(`Failed to create playlist: ${res.status} ${await res.text()}`);
+	}
+	
+	const data = await res.json();
+	return {
+		playlistId: data.videoPlaylist.id,
+		displayName: data.videoPlaylist.displayName
+	};
+}
+
+// Helper: Add video to playlist
+async function addVideoToPlaylist({ playlistId, videoId, oauthToken, peertubeHelpers, settingsManager }) {
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	const body = { videoId };
+	
+	const res = await fetch(`${baseUrl}/api/v1/video-playlists/${playlistId}/videos`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${oauthToken}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(body)
+	});
+	
+	if (!res.ok) {
+		throw new Error(`Failed to add video to playlist: ${res.status} ${await res.text()}`);
+	}
+	
+	return true;
+}
+
 module.exports = {
 	getPeerTubeToken,
 	getPeerTubeChannels,
@@ -452,6 +664,9 @@ module.exports = {
 
 	getOrCreatePermanentLiveStream,
 	createPeerTubeLiveVideo,
+	parseTeamTags,
+	createPlaylist,
+	addVideoToPlaylist,
 	checkVideoExists,
 	getVideoTitle,
 	deleteVideo,

@@ -49,6 +49,9 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					teamId: team.id,
 					teamName: team.name,
 					sport: team.sport,
+					gender: team.gender || null,
+					level: team.teamLevel || null,
+					seasonYear: team.currentSeasonYear || null,
 					logoURL: team.logo,
 					games,
 					lastScraped: new Date().toISOString()
@@ -124,18 +127,32 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 			// Build teams array from cached data
 			const teams = Object.values(hudlSchedules).map(schedule => {
 				const mapping = hudlMappings[schedule.teamId];
+				
+				// Get current season's playlist (if exists)
+				const currentSeasonYear = schedule.seasonYear;
+				const currentSeasonPlaylist = mapping?.seasons?.[currentSeasonYear];
+				
 				return {
 					teamId: schedule.teamId,
 					teamName: schedule.teamName,
 					sport: schedule.sport,
 					gender: schedule.gender || null,
 					level: schedule.level || null,
+					seasonYear: schedule.seasonYear || null,
 					logoURL: schedule.logoURL || null,
 					currentSeason: schedule.currentSeason || null,
 					mapped: !!mapping,
 					channelId: mapping ? mapping.channelId : null,
 					cameraId: mapping ? (typeof mapping.cameraId === 'string' ? mapping.cameraId : '') : '',
+					category: mapping && mapping.category !== undefined ? mapping.category : null,
+					privacy: mapping && mapping.privacy !== undefined ? mapping.privacy : null,
+					commentsEnabled: mapping && mapping.commentsEnabled !== undefined ? mapping.commentsEnabled : null,
+					downloadEnabled: mapping && mapping.downloadEnabled !== undefined ? mapping.downloadEnabled : null,
+					customTags: mapping && Array.isArray(mapping.customTags) ? mapping.customTags : null,
+					description: mapping && mapping.description !== undefined ? mapping.description : null,
 					permanentLiveVideoId: mapping ? mapping.permanentLiveVideoId || null : null,
+					playlistId: currentSeasonPlaylist?.playlistId || null,
+					playlistName: currentSeasonPlaylist?.playlistName || null,
 					rtmpUrl: null,
 					streamKey: null,
 					lastScraped: schedule.lastScraped || null
@@ -182,13 +199,26 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
 		const results = [];
 		for (const team of teams) {
-			// Save mapping, now with optional cameraId
+			// Save mapping with team-specific settings
 			hudlMappings[team.teamId] = {
 				teamId: team.teamId,
 				teamName: team.teamName,
 				channelId: team.channelId,
 				channelHandle: team.channelHandle,
-				cameraId: typeof team.cameraId === 'string' ? team.cameraId : ''
+				cameraId: typeof team.cameraId === 'string' ? team.cameraId : '',
+				// Per-team video settings (optional, will use camera defaults if not provided)
+				category: team.category !== undefined ? team.category : undefined,
+				privacy: team.privacy !== undefined ? team.privacy : undefined,
+				commentsEnabled: team.commentsEnabled !== undefined ? team.commentsEnabled : undefined,
+				downloadEnabled: team.downloadEnabled !== undefined ? team.downloadEnabled : undefined,
+				customTags: Array.isArray(team.customTags) ? team.customTags : undefined,
+				description: team.description !== undefined ? team.description : undefined,
+				// Permanent live video credentials (ONE per team, reused across all seasons)
+				permanentLiveVideoId: hudlMappings[team.teamId]?.permanentLiveVideoId || null,
+				permanentLiveRtmpUrl: hudlMappings[team.teamId]?.permanentLiveRtmpUrl || null,
+				permanentLiveStreamKey: hudlMappings[team.teamId]?.permanentLiveStreamKey || null,
+				seasons: hudlMappings[team.teamId]?.seasons || {},
+				currentSeasonYear: hudlMappings[team.teamId]?.currentSeasonYear || null
 			};
 			results.push({
 				teamName: team.teamName,
@@ -271,6 +301,9 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 							teamId: team.id,
 							teamName: team.name,
 							sport: team.sport,
+							gender: team.gender || null,
+							level: team.teamLevel || null,
+							seasonYear: team.currentSeasonYear || null,
 							logoURL: team.logo,
 							games,
 							lastScraped: new Date().toISOString()
@@ -606,6 +639,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				   teamId: team.id,
 				   teamName: team.name,
 				   sport: team.sport,
+				   seasonYear: team.currentSeasonYear || null,
 				   logoURL: team.logo,
 				   games,
 				   lastScraped: new Date().toISOString()
