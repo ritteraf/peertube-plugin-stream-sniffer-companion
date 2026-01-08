@@ -6,28 +6,28 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 	const { requireAuth } = require('./lib-auth-manager.js');
 
 	// Async helpers for camera assignments (now using storageManager)
-	       async function getCameraAssignments() {
-		       if (!storageManager) throw new Error('storageManager not initialized');
-		       const assignments = (await storageManager.getData('camera-assignments')) || {};
-			   // ...existing code...
-		       return assignments;
-	       }
-	       async function setCameraAssignments(assignments) {
-		       if (!storageManager) throw new Error('storageManager not initialized');
-			   // ...existing code...
-		       await storageManager.storeData('camera-assignments', assignments);
-	       }
+	async function getCameraAssignments() {
+		if (!storageManager) throw new Error('storageManager not initialized');
+		const assignments = (await storageManager.getData('camera-assignments')) || {};
+		// ...existing code...
+		return assignments;
+	}
+	async function setCameraAssignments(assignments) {
+		if (!storageManager) throw new Error('storageManager not initialized');
+		// ...existing code...
+		await storageManager.storeData('camera-assignments', assignments);
+	}
 
 	// DELETE /logout
 	router.delete('/logout', requireAuth, async (req, res) => {
 		const snifferId = req.snifferId;
 		if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-		       let sniffers = (await storageManager.getData('sniffers')) || {};
-		       if (sniffers[snifferId]) {
-			       sniffers[snifferId].streamToken = null;
-			       sniffers[snifferId].tokenExpiresAt = new Date(0).toISOString();
-			       await storageManager.storeData('sniffers', sniffers);
-		       }
+		let sniffers = (await storageManager.getData('sniffers')) || {};
+		if (sniffers[snifferId]) {
+			sniffers[snifferId].streamToken = null;
+			sniffers[snifferId].tokenExpiresAt = new Date(0).toISOString();
+			await storageManager.storeData('sniffers', sniffers);
+		}
 		return res.status(200).json({
 			success: true,
 			message: 'Logged out successfully',
@@ -43,12 +43,12 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			const removed = cameras[snifferId] ? Object.keys(cameras[snifferId]) : [];
 			const endpoints = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.endpointPath) : [];
 			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
-			
+
 			// Get sniffer's OAuth token for PeerTube API calls
 			const sniffers = (await storageManager.getData('sniffers')) || {};
 			const snifferEntry = sniffers[snifferId];
 			const oauthToken = snifferEntry && snifferEntry.oauthToken;
-			
+
 			// Delete videos from PeerTube
 			const permanentLivesDeleted = [];
 			if (oauthToken && videoIdsToDelete.length > 0) {
@@ -63,7 +63,7 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					}
 				}
 			}
-			
+
 			cameras[snifferId] = {};
 			await setCameraAssignments(cameras);
 			return res.status(200).json({
@@ -96,17 +96,17 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			let endpoint = null;
 			let permanentLiveVideoId = null;
 			let permanentLiveDeleted = false;
-			
+
 			if (cameras[snifferId] && cameras[snifferId][cameraId]) {
 				endpoint = cameras[snifferId][cameraId].endpointPath;
 				permanentLiveVideoId = cameras[snifferId][cameraId].permanentLiveVideoId;
-				
+
 				// Get sniffer's OAuth token and delete video from PeerTube
 				if (permanentLiveVideoId) {
 					const sniffers = (await storageManager.getData('sniffers')) || {};
 					const snifferEntry = sniffers[snifferId];
 					const oauthToken = snifferEntry && snifferEntry.oauthToken;
-					
+
 					if (oauthToken) {
 						const { deleteVideo } = require('./lib-peertube-api.js');
 						try {
@@ -118,7 +118,7 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 						}
 					}
 				}
-				
+
 				delete cameras[snifferId][cameraId];
 				await setCameraAssignments(cameras);
 			}
@@ -149,13 +149,13 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			const cameras = await getCameraAssignments();
 			const deletedCameras = cameras[snifferId] ? Object.keys(cameras[snifferId]).length : 0;
 			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
-			
+
 			// Get sniffer's OAuth token for PeerTube API calls
 			if (!storageManager) throw new Error('storageManager not initialized');
 			let sniffers = (await storageManager.getData('sniffers')) || {};
 			const snifferEntry = sniffers[snifferId];
 			const oauthToken = snifferEntry && snifferEntry.oauthToken;
-			
+
 			// Delete videos from PeerTube
 			const permanentLivesDeleted = [];
 			if (oauthToken && videoIdsToDelete.length > 0) {
@@ -170,7 +170,7 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					}
 				}
 			}
-			
+
 			delete cameras[snifferId];
 			await setCameraAssignments(cameras);
 			// Remove sniffer credentials as well
@@ -200,7 +200,7 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			const { getPeerTubeChannels } = require('./lib-peertube-api.js');
 			const snifferId = req.snifferId;
 			if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-			   const sniffers = (await storageManager.getData('sniffers')) || {};
+			const sniffers = (await storageManager.getData('sniffers')) || {};
 			const username = sniffers[snifferId] && sniffers[snifferId].peertubeUsername;
 			const password = sniffers[snifferId] && sniffers[snifferId].peertubePassword;
 			if (!username || !password) {
@@ -229,30 +229,30 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 	// GET /categories
 	router.get('/categories', requireAuth, async (req, res) => {
 		try {
-							       const fetch = require('node-fetch');
-							       let categories = [];
-							       let message = '';
-							       try {
-								       // Determine PeerTube base URL
-								       let baseUrl = null;
-								       if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
-									       baseUrl = peertubeHelpers.config.getWebserverUrl();
-								       }
-								       baseUrl = baseUrl || process.env.PEERTUBE_BASE_URL || '';
-								       if (!baseUrl) throw new Error('Cannot determine PeerTube base URL');
-								       const resPeerTube = await fetch(`${baseUrl}/api/v1/videos/categories`);
-								       if (!resPeerTube.ok) throw new Error(`Failed to fetch categories: ${resPeerTube.status}`);
-								       const raw = await resPeerTube.json();
-								       categories = Object.entries(raw).map(([id, label]) => ({ id: Number(id), label }));
-								       message = `Found ${categories.length} categories`;
-							       } catch (err) {
-								       message = `Exception fetching categories: ${err.message}`;
-								       console.error('[PLUGIN] /categories exception:', err);
-							       }
-							       return res.status(200).json({
-								       categories,
-								       message
-							       });
+			const fetch = require('node-fetch');
+			let categories = [];
+			let message = '';
+			try {
+				// Determine PeerTube base URL
+				let baseUrl = null;
+				if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
+					baseUrl = peertubeHelpers.config.getWebserverUrl();
+				}
+				baseUrl = baseUrl || process.env.PEERTUBE_BASE_URL || '';
+				if (!baseUrl) throw new Error('Cannot determine PeerTube base URL');
+				const resPeerTube = await fetch(`${baseUrl}/api/v1/videos/categories`);
+				if (!resPeerTube.ok) throw new Error(`Failed to fetch categories: ${resPeerTube.status}`);
+				const raw = await resPeerTube.json();
+				categories = Object.entries(raw).map(([id, label]) => ({ id: Number(id), label }));
+				message = `Found ${categories.length} categories`;
+			} catch (err) {
+				message = `Exception fetching categories: ${err.message}`;
+				console.error('[PLUGIN] /categories exception:', err);
+			}
+			return res.status(200).json({
+				categories,
+				message
+			});
 		} catch (err) {
 			return res.status(500).json({
 				categories: [],
@@ -265,30 +265,30 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 	// GET /privacy-options
 	router.get('/privacy-options', requireAuth, async (req, res) => {
 		try {
-						       const fetch = require('node-fetch');
-						       let privacies = [];
-						       let message = '';
-						       try {
-							       // Determine PeerTube base URL
-							       let baseUrl = null;
-							       if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
-								       baseUrl = peertubeHelpers.config.getWebserverUrl();
-							       }
-							       baseUrl = baseUrl || process.env.PEERTUBE_BASE_URL || '';
-							       if (!baseUrl) throw new Error('Cannot determine PeerTube base URL');
-							       const resPeerTube = await fetch(`${baseUrl}/api/v1/videos/privacies`);
-							       if (!resPeerTube.ok) throw new Error(`Failed to fetch privacy options: ${resPeerTube.status}`);
-							       const raw = await resPeerTube.json();
-							       privacies = Object.entries(raw).map(([id, name]) => ({ id: Number(id), name }));
-							       message = `Found ${privacies.length} privacy options`;
-						       } catch (err) {
-							       message = `Exception fetching privacy options: ${err.message}`;
-							       console.error('[PLUGIN] /privacy-options exception:', err);
-						       }
-						       return res.status(200).json({
-							       privacies,
-							       message
-						       });
+			const fetch = require('node-fetch');
+			let privacies = [];
+			let message = '';
+			try {
+				// Determine PeerTube base URL
+				let baseUrl = null;
+				if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
+					baseUrl = peertubeHelpers.config.getWebserverUrl();
+				}
+				baseUrl = baseUrl || process.env.PEERTUBE_BASE_URL || '';
+				if (!baseUrl) throw new Error('Cannot determine PeerTube base URL');
+				const resPeerTube = await fetch(`${baseUrl}/api/v1/videos/privacies`);
+				if (!resPeerTube.ok) throw new Error(`Failed to fetch privacy options: ${resPeerTube.status}`);
+				const raw = await resPeerTube.json();
+				privacies = Object.entries(raw).map(([id, name]) => ({ id: Number(id), name }));
+				message = `Found ${privacies.length} privacy options`;
+			} catch (err) {
+				message = `Exception fetching privacy options: ${err.message}`;
+				console.error('[PLUGIN] /privacy-options exception:', err);
+			}
+			return res.status(200).json({
+				privacies,
+				message
+			});
 		} catch (err) {
 			return res.status(500).json({
 				privacies: [],
@@ -302,9 +302,9 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 	router.get('/my-config', requireAuth, async (req, res) => {
 		const snifferId = req.snifferId;
 		try {
-			   const cameras = await getCameraAssignments();
+			const cameras = await getCameraAssignments();
 			const assignments = cameras[snifferId] ? Object.values(cameras[snifferId]) : [];
-					   // ...existing code...
+			// ...existing code...
 			const pkg = require('./package.json');
 			return res.status(200).json({
 				snifferId,
@@ -401,13 +401,13 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					await storageManager.storeData('hudl-mappings', hudlMappings);
 				}
 			}
-			       return res.status(200).json({
-				       success: true,
-				       message: 'Configuration saved successfully',
-				       snifferId,
-				       timestamp: new Date().toISOString(),
-				       assignmentsCreated: assignments.length
-			       });
+			return res.status(200).json({
+				success: true,
+				message: 'Configuration saved successfully',
+				snifferId,
+				timestamp: new Date().toISOString(),
+				assignmentsCreated: assignments.length
+			});
 		} catch (err) {
 			return res.status(500).json({ error: 'PLUGIN_CAMERA_SAVE_FAILED', message: err.message });
 		}

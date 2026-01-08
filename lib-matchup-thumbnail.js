@@ -59,9 +59,9 @@ async function getPlaceholderBuffer(teamName = '') {
     <rect width="100%" height="100%" fill="white" />
     <g>
       ${lines.map((line, i) => {
-        const y = (LOGO_SIZE - svgHeight) / 2 + (i + 1) * lineHeight - lineHeight / 4;
-        return `<text x="50%" y="${y}" text-anchor="middle" font-family="sans-serif" font-size="${fontSize}" font-weight="bold" fill="#333">${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>`;
-      }).join('')}
+    const y = (LOGO_SIZE - svgHeight) / 2 + (i + 1) * lineHeight - lineHeight / 4;
+    return `<text x="50%" y="${y}" text-anchor="middle" font-family="sans-serif" font-size="${fontSize}" font-weight="bold" fill="#333">${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>`;
+  }).join('')}
     </g>
   </svg>`;
   return await sharp(Buffer.from(svg)).png().toBuffer();
@@ -175,7 +175,7 @@ async function generateMatchupThumbnail(homeLogoUrl, awayLogoUrl, homeId, awayId
     .png()
     .toBuffer();
   const vsLeft = Math.round((THUMBNAIL_WIDTH - Math.round(THUMBNAIL_WIDTH * 0.4)) / 2);
-  const vsTop = Math.round((THUMBNAIL_HEIGHT - Math.round(THUMBNAIL_WIDTH * 0.4) * (422/600)) / 2); // keep aspect ratio
+  const vsTop = Math.round((THUMBNAIL_HEIGHT - Math.round(THUMBNAIL_WIDTH * 0.4) * (422 / 600)) / 2); // keep aspect ratio
   composite = await sharp(composite)
     .composite([
       {

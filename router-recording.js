@@ -5,6 +5,52 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 	const router = express.Router();
 	const { requireAuth } = require('./lib-auth-manager.js');
 
+	// Initialize global session tracking
+	if (!global.__ACTIVE_RECORDING_SESSIONS__) {
+		global.__ACTIVE_RECORDING_SESSIONS__ = {};
+	}
+
+	// GET /active-streams - Public endpoint (no auth required) for FalconCast app
+	router.get('/active-streams', async (req, res) => {
+		try {
+			const sessions = global.__ACTIVE_RECORDING_SESSIONS__ || {};
+			const activeStreams = [];
+
+			// Flatten sessions from all sniffers
+			for (const snifferId in sessions) {
+				for (const cameraId in sessions[snifferId]) {
+					const session = sessions[snifferId][cameraId];
+					const startTime = new Date(session.startTime);
+					const now = new Date();
+					const durationMs = now - startTime;
+					const durationSeconds = Math.floor(durationMs / 1000);
+
+					activeStreams.push({
+						snifferId,
+						cameraId,
+						teamName: session.teamName,
+						opponent: session.opponent,
+						permanentLiveVideoId: session.permanentLiveVideoId,
+						permanentLiveUrl: session.permanentLiveUrl,
+						startTime: session.startTime,
+						durationSeconds
+					});
+				}
+			}
+
+			return res.status(200).json({
+				activeStreams,
+				count: activeStreams.length
+			});
+		} catch (err) {
+			console.error('[PLUGIN] Error fetching active streams:', err);
+			return res.status(500).json({
+				error: 'Failed to fetch active streams',
+				message: err.message
+			});
+		}
+	});
+
 	// POST /recording-started
 	router.post('/recording-started', requireAuth, async (req, res) => {
 		const snifferId = req.snifferId;
@@ -50,24 +96,24 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					error: 'No camera config'
 				});
 			}
-			   const snifferToken = snifferEntry && snifferEntry.oauthToken;
-			   if (!snifferToken) {
-				   return res.status(401).json({
-					   acknowledged: false,
-					   message: 'No PeerTube OAuth token found for sniffer',
-					   error: 'No OAuth token'
-				   });
-			   }
-			   const liveStream = await createPeerTubeLiveVideo({
-				   channelId: cameraAssignment.channelId,
-				   name: cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream',
-				   description: cameraAssignment.streamDescription || '',
-				   category: cameraAssignment.defaultStreamCategory,
-				   privacy: cameraAssignment.privacyId,
-				   oauthToken: snifferToken,
-				   peertubeHelpers,
-				   settingsManager
-			   });
+			const snifferToken = snifferEntry && snifferEntry.oauthToken;
+			if (!snifferToken) {
+				return res.status(401).json({
+					acknowledged: false,
+					message: 'No PeerTube OAuth token found for sniffer',
+					error: 'No OAuth token'
+				});
+			}
+			const liveStream = await createPeerTubeLiveVideo({
+				channelId: cameraAssignment.channelId,
+				name: cameraAssignment.streamTitle || cameraAssignment.cameraId || 'Live Stream',
+				description: cameraAssignment.streamDescription || '',
+				category: cameraAssignment.defaultStreamCategory,
+				privacy: cameraAssignment.privacyId,
+				oauthToken: snifferToken,
+				peertubeHelpers,
+				settingsManager
+			});
 			return res.status(200).json({
 				acknowledged: true,
 				message: 'Recording started',
@@ -87,91 +133,91 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 
 	// POST /recording-started-hudl
 	router.post('/recording-started-hudl', requireAuth, async (req, res) => {
-			   const snifferId = req.snifferId;
-			   const event = req.body || {};
-			   const streamToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
-			   console.log('[PLUGIN HUDL] /recording-started-hudl called:', {
-				   snifferId,
-				   cameraId: event.cameraId,
-				   token: streamToken ? (typeof streamToken === 'string' ? streamToken.substring(0, 8) + '...' : streamToken) : null,
-				   event
-			   });
-		       if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
-			       console.warn('[PLUGIN HUDL] Invalid input for /recording-started-hudl:', event);
-			       return res.status(400).json({
-				       acknowledged: false,
-				       message: 'Request body must be an object with cameraId (string)',
-				       error: 'Invalid input'
-			       });
-		       }
-			       if (!storageManager) {
-			       console.error('[PLUGIN HUDL] storageManager not initialized');
-			       return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-		       }
-		       let log = (await storageManager.getData('recording-log')) || {};
-		       if (!log[snifferId]) log[snifferId] = [];
-		       log[snifferId].push({
-			       type: 'started-permanent',
-			       ...event,
-			       timestamp: new Date().toISOString()
-		       });
-		       await storageManager.storeData('recording-log', log);
+		const snifferId = req.snifferId;
+		const event = req.body || {};
+		const streamToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
+		console.log('[PLUGIN HUDL] /recording-started-hudl called:', {
+			snifferId,
+			cameraId: event.cameraId,
+			token: streamToken ? (typeof streamToken === 'string' ? streamToken.substring(0, 8) + '...' : streamToken) : null,
+			event
+		});
+		if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
+			console.warn('[PLUGIN HUDL] Invalid input for /recording-started-hudl:', event);
+			return res.status(400).json({
+				acknowledged: false,
+				message: 'Request body must be an object with cameraId (string)',
+				error: 'Invalid input'
+			});
+		}
+		if (!storageManager) {
+			console.error('[PLUGIN HUDL] storageManager not initialized');
+			return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+		}
+		let log = (await storageManager.getData('recording-log')) || {};
+		if (!log[snifferId]) log[snifferId] = [];
+		log[snifferId].push({
+			type: 'started-permanent',
+			...event,
+			timestamp: new Date().toISOString()
+		});
+		await storageManager.storeData('recording-log', log);
 		// Use or create a permanent live stream via PeerTube API, using sniffer context
 		try {
 			const { getOrCreatePermanentLiveStream } = require('./lib-peertube-api.js');
 			const { getMatchupKey, THUMBNAIL_DIR } = require('./lib-matchup-thumbnail.js');
 			const path = require('path');
 			const fs = require('fs');
-					 const sniffers = (await storageManager.getData('sniffers')) || {};
-					 const snifferEntry = sniffers[snifferId];
-					 const snifferOAuthToken = snifferEntry && snifferEntry.oauthToken;
-					 const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
-					 // Stream token validation (after expectedStreamToken is defined)
-					 if (streamToken !== expectedStreamToken) {
-						 console.warn('[PLUGIN HUDL] 401: Stream token mismatch', { snifferId, receivedToken: streamToken, expectedStreamToken });
-						 return res.status(401).json({
-							 acknowledged: false,
-							 message: 'Stream token mismatch',
-							 error: 'Invalid stream token'
-						 });
-					 }
-					 console.log('[PLUGIN HUDL] Recording start debug:', {
-						 snifferId,
-						 receivedToken: streamToken,
-						 expectedStreamToken,
-						 hasOAuthToken: !!snifferOAuthToken
-					 });
-					 if (!snifferOAuthToken) {
-						 console.warn('[PLUGIN HUDL] 401: No PeerTube OAuth token found for sniffer', { snifferId, sniffers: Object.keys(sniffers), snifferEntry });
-						 return res.status(401).json({
-							 acknowledged: false,
-							 message: 'No PeerTube OAuth token found for sniffer',
-							 error: 'No OAuth token',
-							 snifferId,
-							 snifferEntry
-						 });
-					 }
+			const sniffers = (await storageManager.getData('sniffers')) || {};
+			const snifferEntry = sniffers[snifferId];
+			const snifferOAuthToken = snifferEntry && snifferEntry.oauthToken;
+			const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
+			// Stream token validation (after expectedStreamToken is defined)
+			if (streamToken !== expectedStreamToken) {
+				console.warn('[PLUGIN HUDL] 401: Stream token mismatch', { snifferId, receivedToken: streamToken, expectedStreamToken });
+				return res.status(401).json({
+					acknowledged: false,
+					message: 'Stream token mismatch',
+					error: 'Invalid stream token'
+				});
+			}
+			console.log('[PLUGIN HUDL] Recording start debug:', {
+				snifferId,
+				receivedToken: streamToken,
+				expectedStreamToken,
+				hasOAuthToken: !!snifferOAuthToken
+			});
+			if (!snifferOAuthToken) {
+				console.warn('[PLUGIN HUDL] 401: No PeerTube OAuth token found for sniffer', { snifferId, sniffers: Object.keys(sniffers), snifferEntry });
+				return res.status(401).json({
+					acknowledged: false,
+					message: 'No PeerTube OAuth token found for sniffer',
+					error: 'No OAuth token',
+					snifferId,
+					snifferEntry
+				});
+			}
 			// Look up camera assignment by cameraId
-					       const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
-					       const cameraAssignment = cameraAssignments[snifferId] && cameraAssignments[snifferId][event.cameraId];
-					       if (!cameraAssignment) {
-						       console.warn('[PLUGIN HUDL] 404: Camera assignment not found', {
-							       snifferId,
-							       cameraId: event.cameraId,
-							       cameraAssignments: cameraAssignments[snifferId] || {},
-							       allAssignments: cameraAssignments
-						       });
-						       return res.status(404).json({
-							       acknowledged: false,
-							       message: 'Camera assignment not found',
-							       error: 'No camera config',
-							       snifferId,
-							       cameraId: event.cameraId,
-							       cameraAssignments: cameraAssignments[snifferId] || {},
-							       allAssignments: cameraAssignments
-						       });
-					       }
-						       // No need to check for cameraAssignment.oauthToken; always use snifferToken
+			const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
+			const cameraAssignment = cameraAssignments[snifferId] && cameraAssignments[snifferId][event.cameraId];
+			if (!cameraAssignment) {
+				console.warn('[PLUGIN HUDL] 404: Camera assignment not found', {
+					snifferId,
+					cameraId: event.cameraId,
+					cameraAssignments: cameraAssignments[snifferId] || {},
+					allAssignments: cameraAssignments
+				});
+				return res.status(404).json({
+					acknowledged: false,
+					message: 'Camera assignment not found',
+					error: 'No camera config',
+					snifferId,
+					cameraId: event.cameraId,
+					cameraAssignments: cameraAssignments[snifferId] || {},
+					allAssignments: cameraAssignments
+				});
+			}
+			// No need to check for cameraAssignment.oauthToken; always use snifferToken
 			// Match correct game for the day using startTime (±15 minutes) and cameraId assignment
 			const schedules = (await storageManager.getData('hudl-schedules')) || {};
 			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
@@ -180,14 +226,14 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			let matchedChannelId = null;
 			let thumbnailPath = undefined;
 			let teamsToCheck = Object.entries(schedules);
-			
+
 			console.log('[PLUGIN HUDL] Game matching started:', {
 				cameraId: event.cameraId,
 				startTime: event.startTime,
 				totalTeams: teamsToCheck.length,
 				hasMappings: Object.keys(hudlMappings).length > 0
 			});
-			
+
 			// Filter teams by cameraId assignment if present
 			if (event.cameraId) {
 				// Find teams with cameraId assigned (hudlMappings[teamId].cameraId === event.cameraId)
@@ -203,41 +249,41 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				}
 				// If no teams have cameraId assigned, fallback to all teams
 			}
-		if (event.startTime) {
-			const eventTime = new Date(event.startTime).getTime();
-			const earlyWindowMs = 15 * 60 * 1000; // 15 minutes before game start
-			const maxGameDurationMs = 3 * 60 * 60 * 1000; // 3 hours fallback for single games
-			const eventDate = new Date(event.startTime).setHours(0, 0, 0, 0);
-			
-			let gamesEvaluated = 0;
-			let gamesFilteredByLocation = 0;
-			let gamesFilteredByOutcome = 0;
-			
-			for (const [teamId, teamData] of teamsToCheck) {
-				const games = teamData.games || [];
+			if (event.startTime) {
+				const eventTime = new Date(event.startTime).getTime();
+				const earlyWindowMs = 15 * 60 * 1000; // 15 minutes before game start
+				const maxGameDurationMs = 3 * 60 * 60 * 1000; // 3 hours fallback for single games
+				const eventDate = new Date(event.startTime).setHours(0, 0, 0, 0);
+
+				let gamesEvaluated = 0;
+				let gamesFilteredByLocation = 0;
+				let gamesFilteredByOutcome = 0;
+
+				for (const [teamId, teamData] of teamsToCheck) {
+					const games = teamData.games || [];
 					for (const game of games) {
 						gamesEvaluated++;
 						// Use timeUtc if available, fallback to date for backwards compatibility
 						const gameTimeField = game.timeUtc || game.date;
 						if (!gameTimeField) continue;
-						
+
 						// Only match HOME games - camera cannot detect away games
 						// scheduleEntryLocation: 1 = HOME, 2 = AWAY, 0/3 = NEUTRAL (numeric enum from HUDL API)
 						if (game.scheduleEntryLocation !== undefined && game.scheduleEntryLocation !== 1) {
 							gamesFilteredByLocation++;
 							continue;
 						}
-						
+
 						// Skip games that have already been played
 						// scheduleEntryOutcome: 0 = not played, 1 = WIN, 2 = LOSS (numeric enum from HUDL API)
 						if (game.scheduleEntryOutcome !== undefined && game.scheduleEntryOutcome !== 0) {
 							gamesFilteredByOutcome++;
 							continue;
 						}
-						
+
 						const gameStartTime = new Date(gameTimeField).getTime();
 						const gameDate = new Date(gameTimeField).setHours(0, 0, 0, 0);
-						
+
 						// Find next game scheduled for this team on the same day
 						let nextGameStartTime = null;
 						for (const nextGame of games) {
@@ -250,36 +296,42 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 								}
 							}
 						}
-						
+
 						// Upper limit: next game start time, or game start + 3 hours
 						const upperLimit = nextGameStartTime || (gameStartTime + maxGameDurationMs);
-						
+
 						// Match if EITHER:
 						// 1. Within 15 minutes BEFORE game start (early detection)
 						// 2. OR (after game start, before upper limit, same day, not finished)
 						const isEarlyDetection = eventTime < gameStartTime && (gameStartTime - eventTime) <= earlyWindowMs;
-						const isInProgress = eventTime >= gameStartTime 
-						                     && eventTime < upperLimit
-						                     && gameDate === eventDate
-						                     && game.scheduleEntryOutcome === 0;
-						
-					if (isEarlyDetection || isInProgress) {
-						matchedGame = game;
-						matchedTeamId = teamId;
-						matchedChannelId = hudlMappings[teamId]?.channelId;
-						console.log('[PLUGIN HUDL] ✓ Game matched:', {
-							opponent: game.opponent,
-							gameTime: gameTimeField,
-							recordingTime: event.startTime,
-							teamName: teamData.teamName,
-							matchReason: isEarlyDetection ? 'early-detection' : 'in-progress'
-						});
-						// Check for existing matchup thumbnail
-							if (game.homeTeamId && game.awayTeamId) {
-								const matchupKey = getMatchupKey(game.homeTeamId, game.awayTeamId);
+						const isInProgress = eventTime >= gameStartTime
+							&& eventTime < upperLimit
+							&& gameDate === eventDate
+							&& game.scheduleEntryOutcome === 0;
+
+						if (isEarlyDetection || isInProgress) {
+							matchedGame = game;
+							matchedTeamId = teamId;
+							matchedChannelId = hudlMappings[teamId]?.channelId;
+							console.log('[PLUGIN HUDL] ✓ Game matched:', {
+								opponent: game.opponentDetails?.name,
+								gameTime: gameTimeField,
+								recordingTime: event.startTime,
+								teamName: teamData.teamName,
+								matchReason: isEarlyDetection ? 'early-detection' : 'in-progress'
+							});
+							// Check for existing matchup thumbnail
+							// matchedTeamId is the home team (we filter for home games only)
+							// opponentDetails.schoolId is the away team
+							const opponentSchoolId = game.opponentDetails?.schoolId;
+							if (teamId && opponentSchoolId) {
+								const matchupKey = getMatchupKey(teamId, opponentSchoolId);
 								const possiblePath = path.join(THUMBNAIL_DIR, matchupKey);
 								if (fs.existsSync(possiblePath)) {
 									thumbnailPath = possiblePath;
+									console.log('[PLUGIN HUDL] ✓ Matchup thumbnail found:', possiblePath);
+								} else {
+									console.log('[PLUGIN HUDL] ✗ Matchup thumbnail not found:', possiblePath);
 								}
 							}
 							break;
@@ -287,22 +339,22 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					}
 					if (matchedGame) break;
 				}
-			
-			if (!matchedGame) {
-				console.log('[PLUGIN HUDL] ✗ No game matched:', {
-					gamesEvaluated,
-					filteredByLocation: gamesFilteredByLocation,
-					filteredByOutcome: gamesFilteredByOutcome,
-					reason: gamesEvaluated === 0 ? 'no-games-in-schedules' : 'no-time-match'
-				});
+
+				if (!matchedGame) {
+					console.log('[PLUGIN HUDL] ✗ No game matched:', {
+						gamesEvaluated,
+						filteredByLocation: gamesFilteredByLocation,
+						filteredByOutcome: gamesFilteredByOutcome,
+						reason: gamesEvaluated === 0 ? 'no-games-in-schedules' : 'no-time-match'
+					});
+				}
+			} else {
+				console.log('[PLUGIN HUDL] No startTime provided, skipping game matching');
 			}
-		} else {
-			console.log('[PLUGIN HUDL] No startTime provided, skipping game matching');
-		}
-			
+
 			// Import shared title generator
 			const { generateGameTitle } = require('./lib-game-title.js');
-			
+
 			// Get school name and team data for matched game to generate title
 			let generatedTitle = null;
 			if (matchedGame && matchedTeamId) {
@@ -311,112 +363,139 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				const teamData = schedules[matchedTeamId];
 				generatedTitle = generateGameTitle(matchedGame, teamData, schoolName);
 			}
-			
-		// MATCHED GAME: Use team's permanent live video
-		if (matchedGame && matchedTeamId) {
-			const teamMapping = hudlMappings[matchedTeamId];
-			if (!teamMapping) {
-				console.error('[PLUGIN HUDL] Team mapping not found for matched team:', matchedTeamId);
-				return res.status(500).json({
-					acknowledged: false,
-					message: 'Team mapping not found',
-					error: 'Configuration error'
+
+			// MATCHED GAME: Use team's permanent live video
+			if (matchedGame && matchedTeamId) {
+				const teamMapping = hudlMappings[matchedTeamId];
+				if (!teamMapping) {
+					console.error('[PLUGIN HUDL] Team mapping not found for matched team:', matchedTeamId);
+					return res.status(500).json({
+						acknowledged: false,
+						message: 'Team mapping not found',
+						error: 'Configuration error'
+					});
+				}
+
+				// Prepare team settings for permanent live stream
+				const { parseTeamTags } = require('./lib-peertube-api.js');
+				const schedule = schedules[matchedTeamId];
+				const teamTags = parseTeamTags(schedule?.gender, schedule?.level, schedule?.sport);
+
+				// Add opponent name to tags if available
+				const opponentName = matchedGame.opponentDetails?.name;
+				if (opponentName) {
+					teamTags.push(opponentName);
+				}
+
+				// Add custom tags if available
+				if (Array.isArray(teamMapping.customTags)) {
+					teamTags.push(...teamMapping.customTags);
+				}
+
+				// Validate and limit tags: max 5 tags, each 2-30 characters
+				const validTags = teamTags
+					.filter(tag => typeof tag === 'string' && tag.length >= 2 && tag.length <= 30)
+					.slice(0, 5);
+
+				const teamSettings = {
+					teamId: matchedTeamId,
+					teamName: teamMapping.teamName,
+					channelId: teamMapping.channelId,
+					streamTitle: generatedTitle,
+					streamDescription: teamMapping.description || `${teamMapping.teamName} game`,
+					category: teamMapping.category !== undefined ? teamMapping.category : cameraAssignment.defaultStreamCategory,
+					privacy: teamMapping.privacy !== undefined ? teamMapping.privacy : cameraAssignment.privacyId,
+					commentsEnabled: teamMapping.commentsEnabled !== undefined ? teamMapping.commentsEnabled : true,
+					downloadEnabled: teamMapping.downloadEnabled !== undefined ? teamMapping.downloadEnabled : true,
+					tags: validTags,
+					language: 'en', // Default to English
+					licence: 1, // Default to Attribution (CC BY)
+					thumbnailPath,
+					permanentLiveVideoId: teamMapping.permanentLiveVideoId,
+					permanentLiveRtmpUrl: teamMapping.permanentLiveRtmpUrl,
+					permanentLiveStreamKey: teamMapping.permanentLiveStreamKey,
+					seasonYear: schedule?.seasonYear,
+					seasons: teamMapping.seasons || {}
+				};
+
+			console.log(`[PLUGIN HUDL] Team settings for live stream:`, {
+				teamId: matchedTeamId,
+				teamName: teamSettings.teamName,
+				seasonYear: teamSettings.seasonYear,
+				hasSchedule: !!schedule,
+				scheduleSeasonYear: schedule?.seasonYear
+			});
+
+				const liveStream = await getOrCreatePermanentLiveStream(snifferId, matchedTeamId, teamSettings, snifferOAuthToken, peertubeHelpers, settingsManager, storageManager);
+			// Store active recording session for tracking
+			if (!global.__ACTIVE_RECORDING_SESSIONS__[snifferId]) {
+				global.__ACTIVE_RECORDING_SESSIONS__[snifferId] = {};
+			}
+			global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId] = {
+				permanentLiveVideoId: liveStream.videoId,
+				teamId: matchedTeamId,
+				teamName: teamSettings.teamName,
+				opponent: matchedGame.opponentDetails?.name || null,
+				playlistId: teamSettings.seasons?.[teamSettings.seasonYear]?.playlistId || null,
+				seasonYear: teamSettings.seasonYear,
+				startTime: event.startTime || new Date().toISOString(),
+				permanentLiveUrl: liveStream.permanentLiveUrl || null
+			};
+				return res.status(200).json({
+					acknowledged: true,
+					message: 'Using HUDL live video (matched game)',
+					streamId: liveStream.videoId,
+					liveStream,
+					isDuplicate: !liveStream.isNew,
+					hudl: true,
+					permanent: true,
+					thumbnailUsed: thumbnailPath || null,
+					matchedGame: matchedGame,
+					matchedTeamId: matchedTeamId
 				});
 			}
-			
-			// Prepare team settings for permanent live stream
-			const { parseTeamTags } = require('./lib-peertube-api.js');
-			const schedule = schedules[matchedTeamId];
-			const teamTags = parseTeamTags(schedule?.gender, schedule?.level, schedule?.sport);
-			
-			// Add opponent name to tags if available
-			if (matchedGame.opponent) {
-				teamTags.push(matchedGame.opponent);
+
+			// NO MATCH: Create temporary one-time video using camera fallback config
+			else {
+				const { createPeerTubeLiveVideo } = require('./lib-peertube-api.js');
+
+				const fallbackTitle = cameraAssignment.streamTitle || `${cameraAssignment.cameraId} - Live`;
+				const fallbackDescription = cameraAssignment.streamDescription || `Live stream from ${cameraAssignment.cameraId}`;
+
+				console.log('[PLUGIN HUDL] No game matched - creating temporary video with camera fallback config');
+
+				const liveStream = await createPeerTubeLiveVideo({
+					channelId: cameraAssignment.channelId,
+					name: fallbackTitle,
+					description: fallbackDescription,
+					category: cameraAssignment.defaultStreamCategory,
+					privacy: cameraAssignment.privacyId,
+					oauthToken: snifferOAuthToken,
+					peertubeHelpers,
+					settingsManager,
+					snifferId,
+					storageManager
+				});
+
+				return res.status(200).json({
+					acknowledged: true,
+					message: 'Using HUDL live video (fallback config - temporary)',
+					streamId: liveStream.id,
+					liveStream: {
+						videoId: liveStream.id,
+						rtmpUrl: liveStream.rtmpUrl,
+						streamKey: liveStream.streamKey,
+						isNew: true,
+						videoTitle: liveStream.name
+					},
+					isDuplicate: false,
+					hudl: true,
+					permanent: false,
+					thumbnailUsed: null,
+					matchedGame: null,
+					matchedTeamId: null
+				});
 			}
-			
-			// Add custom tags if available
-			if (Array.isArray(teamMapping.customTags)) {
-				teamTags.push(...teamMapping.customTags);
-			}
-			
-			const teamSettings = {
-				teamId: matchedTeamId,
-				teamName: teamMapping.teamName,
-				channelId: teamMapping.channelId,
-				streamTitle: generatedTitle,
-				streamDescription: teamMapping.description || matchedGame.description || `${teamMapping.teamName} game`,
-				category: teamMapping.category !== undefined ? teamMapping.category : cameraAssignment.defaultStreamCategory,
-				privacy: teamMapping.privacy !== undefined ? teamMapping.privacy : cameraAssignment.privacyId,
-				commentsEnabled: teamMapping.commentsEnabled !== undefined ? teamMapping.commentsEnabled : true,
-				downloadEnabled: teamMapping.downloadEnabled !== undefined ? teamMapping.downloadEnabled : true,
-				tags: teamTags,
-				language: 'en', // Default to English
-				licence: 1, // Default to Attribution (CC BY)
-				thumbnailPath,
-				permanentLiveVideoId: teamMapping.permanentLiveVideoId,
-				permanentLiveRtmpUrl: teamMapping.permanentLiveRtmpUrl,
-				permanentLiveStreamKey: teamMapping.permanentLiveStreamKey,
-				seasonYear: schedule?.seasonYear,
-				seasons: teamMapping.seasons || {}
-			};
-			
-			const liveStream = await getOrCreatePermanentLiveStream(snifferId, matchedTeamId, teamSettings, snifferOAuthToken, peertubeHelpers, settingsManager, storageManager);
-			
-			return res.status(200).json({
-				acknowledged: true,
-				message: 'Using HUDL live video (matched game)',
-				streamId: liveStream.videoId,
-				liveStream,
-				isDuplicate: !liveStream.isNew,
-				hudl: true,
-				permanent: true,
-				thumbnailUsed: thumbnailPath || null,
-				matchedGame: matchedGame,
-				matchedTeamId: matchedTeamId
-			});
-		}
-		
-		// NO MATCH: Create temporary one-time video using camera fallback config
-		else {
-			const { createPeerTubeLiveVideo } = require('./lib-peertube-api.js');
-			
-			const fallbackTitle = cameraAssignment.streamTitle || `${cameraAssignment.cameraId} - Live`;
-			const fallbackDescription = cameraAssignment.streamDescription || `Live stream from ${cameraAssignment.cameraId}`;
-			
-			console.log('[PLUGIN HUDL] No game matched - creating temporary video with camera fallback config');
-			
-			const liveStream = await createPeerTubeLiveVideo({
-				channelId: cameraAssignment.channelId,
-				name: fallbackTitle,
-				description: fallbackDescription,
-				category: cameraAssignment.defaultStreamCategory,
-				privacy: cameraAssignment.privacyId,
-				oauthToken: snifferOAuthToken,
-				peertubeHelpers,
-				settingsManager,
-				snifferId,
-				storageManager
-			});
-			
-			return res.status(200).json({
-				acknowledged: true,
-				message: 'Using HUDL live video (fallback config - temporary)',
-				streamId: liveStream.id,
-				liveStream: {
-					videoId: liveStream.id,
-					rtmpUrl: liveStream.rtmpUrl,
-					streamKey: liveStream.streamKey,
-					isNew: true,
-					videoTitle: liveStream.name
-				},
-				isDuplicate: false,
-				hudl: true,
-				permanent: false,
-				thumbnailUsed: null,
-				matchedGame: null,
-				matchedTeamId: null
-			});
-		}
 		} catch (err) {
 			console.error('[PLUGIN HUDL] Error in /recording-started-hudl:', {
 				message: err.message,
@@ -438,7 +517,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 		const snifferId = req.snifferId;
 		const event = req.body || {};
 		const streamToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
-		
+
 		// Initial logging (BEFORE validation checks)
 		console.log('[PLUGIN] /recording-stopped called:', {
 			snifferId,
@@ -447,7 +526,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			token: streamToken ? (typeof streamToken === 'string' ? streamToken.substring(0, 8) + '...' : streamToken) : null,
 			event
 		});
-		
+
 		// Validate input
 		if (!event || typeof event !== 'object' || Array.isArray(event) || !event.cameraId || typeof event.cameraId !== 'string') {
 			console.warn('[PLUGIN] Invalid input for /recording-stopped:', event);
@@ -457,17 +536,17 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				error: 'Invalid input'
 			});
 		}
-		
+
 		if (!storageManager) {
 			console.error('[PLUGIN] storageManager not initialized');
 			return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
 		}
-		
+
 		// Get sniffer data for token validation
 		const sniffers = (await storageManager.getData('sniffers')) || {};
 		const snifferEntry = sniffers[snifferId];
 		const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
-		
+
 		// Stream token validation (double-check after requireAuth)
 		if (streamToken !== expectedStreamToken) {
 			console.warn('[PLUGIN] 401: Stream token mismatch', { snifferId, receivedToken: streamToken, expectedStreamToken });
@@ -477,7 +556,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				error: 'Stream token mismatch'
 			});
 		}
-		
+
 		// Log the recording stopped event
 		let log = (await storageManager.getData('recording-log')) || {};
 		if (!log[snifferId]) log[snifferId] = [];
@@ -487,13 +566,48 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			timestamp: new Date().toISOString()
 		});
 		await storageManager.storeData('recording-log', log);
-		
+
+		// Clean up session tracking and reset permanent live title (with delay)
+		const session = global.__ACTIVE_RECORDING_SESSIONS__?.[snifferId]?.[event.cameraId];
+		if (session && session.permanentLiveVideoId) {
+			const snifferOAuthToken = snifferEntry?.oauthToken;
+			const videoId = session.permanentLiveVideoId;
+			const teamName = session.teamName;
+
+			// Remove session from tracking immediately
+			delete global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId];
+			console.log('[PLUGIN] Cleaned up recording session:', { snifferId, cameraId: event.cameraId });
+
+			// Delay title reset by 5 seconds to ensure PeerTube has created the replay
+			if (snifferOAuthToken) {
+				setTimeout(async () => {
+					try {
+						const { updateVideoMetadata } = require('./lib-peertube-api.js');
+						const genericTitle = `${teamName} - Wait Live`;
+						await updateVideoMetadata({
+							videoId,
+							updates: { name: genericTitle },
+							oauthToken: snifferOAuthToken,
+							peertubeHelpers,
+							settingsManager
+						});
+						console.log('[PLUGIN] Reset permanent live title after delay:', {
+							videoId,
+							newTitle: genericTitle
+						});
+					} catch (err) {
+						console.error('[PLUGIN] Failed to reset permanent live title:', err);
+					}
+				}, 30000); // 30 second delay
+			}
+		}
+
 		console.log('[PLUGIN] Recording stopped successfully:', {
 			snifferId,
 			cameraId: event.cameraId,
 			videoId: event.videoId
 		});
-		
+
 		return res.status(200).json({
 			acknowledged: true,
 			message: 'Recording stopped'

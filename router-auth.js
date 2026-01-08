@@ -163,4 +163,4 @@ module.exports = function createAuthRouter({ storageManager, settingsManager, pe
 
   return router;
 };
-			const now = Date.now();
+const now = Date.now();

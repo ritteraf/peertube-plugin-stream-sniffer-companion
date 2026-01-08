@@ -38,57 +38,57 @@ const fetch = require('node-fetch');
 // Helper to get the PeerTube base URL dynamically
 // Accepts peertubeHelpers, settingsManager (optional), and fallback env
 async function getBaseUrl(peertubeHelpers, settingsManager) {
-	       if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
-		       try {
-			       const url = peertubeHelpers.config.getWebserverUrl();
-					   if (!url) {
-						   console.warn('[PLUGIN] getWebserverUrl returned empty value');
-					   }
-			       if (url) return url;
-		       } catch (e) {
-					   console.error('[PLUGIN] Error in getWebserverUrl:', e);
-		       }
-	       } else {
-			   console.warn('[PLUGIN] peertubeHelpers.config.getWebserverUrl not available');
-	       }
+	if (peertubeHelpers && peertubeHelpers.config && typeof peertubeHelpers.config.getWebserverUrl === 'function') {
+		try {
+			const url = peertubeHelpers.config.getWebserverUrl();
+			if (!url) {
+				console.warn('[PLUGIN] getWebserverUrl returned empty value');
+			}
+			if (url) return url;
+		} catch (e) {
+			console.error('[PLUGIN] Error in getWebserverUrl:', e);
+		}
+	} else {
+		console.warn('[PLUGIN] peertubeHelpers.config.getWebserverUrl not available');
+	}
 
-	       // Fallback: try plugin setting
-	       if (settingsManager && typeof settingsManager.getSetting === 'function') {
-		       try {
-			       const url = await settingsManager.getSetting('peertube-base-url');
-					   if (!url) {
-						   console.warn('[PLUGIN] settingsManager.getSetting("peertube-base-url") returned empty value');
-					   }
-			       if (url) return url;
-		       } catch (e) {
-					   console.error('[PLUGIN] Error in settingsManager.getSetting("peertube-base-url"):', e);
-		       }
-	       } else {
-			   console.warn('[PLUGIN] settingsManager.getSetting not available');
-	       }
+	// Fallback: try plugin setting
+	if (settingsManager && typeof settingsManager.getSetting === 'function') {
+		try {
+			const url = await settingsManager.getSetting('peertube-base-url');
+			if (!url) {
+				console.warn('[PLUGIN] settingsManager.getSetting("peertube-base-url") returned empty value');
+			}
+			if (url) return url;
+		} catch (e) {
+			console.error('[PLUGIN] Error in settingsManager.getSetting("peertube-base-url"):', e);
+		}
+	} else {
+		console.warn('[PLUGIN] settingsManager.getSetting not available');
+	}
 
-	       // Fallback: environment variable
-	       if (process.env.PEERTUBE_BASE_URL) {
-			   if (!process.env.PEERTUBE_BASE_URL) {
-				   console.warn('[PLUGIN] process.env.PEERTUBE_BASE_URL is empty');
-			   }
-		       return process.env.PEERTUBE_BASE_URL;
-	       }
-		console.error('[PLUGIN] Cannot determine PeerTube base URL: no helper, setting, or env PEERTUBE_BASE_URL');
-	       throw new Error('Cannot determine PeerTube base URL: no helper, setting, or env PEERTUBE_BASE_URL');
+	// Fallback: environment variable
+	if (process.env.PEERTUBE_BASE_URL) {
+		if (!process.env.PEERTUBE_BASE_URL) {
+			console.warn('[PLUGIN] process.env.PEERTUBE_BASE_URL is empty');
+		}
+		return process.env.PEERTUBE_BASE_URL;
+	}
+	console.error('[PLUGIN] Cannot determine PeerTube base URL: no helper, setting, or env PEERTUBE_BASE_URL');
+	throw new Error('Cannot determine PeerTube base URL: no helper, setting, or env PEERTUBE_BASE_URL');
 }
 
 
 
 // Fetch user's channels using server privileges (no OAuth needed)
 async function getPeerTubeChannels({ username, peertubeHelpers, settingsManager }) {
-       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-       const channelsRes = await fetch(`${baseUrl}/api/v1/accounts/${username}/video-channels`);
-       if (!channelsRes.ok) {
-	       throw new Error(`Failed to fetch channels: ${channelsRes.status}`);
-       }
-       const channelsData = await channelsRes.json();
-       return { username, channels: channelsData.data || [] };
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	const channelsRes = await fetch(`${baseUrl}/api/v1/accounts/${username}/video-channels`);
+	if (!channelsRes.ok) {
+		throw new Error(`Failed to fetch channels: ${channelsRes.status}`);
+	}
+	const channelsData = await channelsRes.json();
+	return { username, channels: channelsData.data || [] };
 }
 
 
@@ -113,86 +113,86 @@ async function getPeerTubePrivacyOptions({ peertubeHelpers, settingsManager }) {
 
 // Helper: Check if a video exists
 async function checkVideoExists(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null) {
-	       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-	       let res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-		       headers: { 'Authorization': `Bearer ${oauthToken}` }
-	       });
-	       if (res.status === 401 && snifferId && storageManager) {
-		       // Automatically refresh PeerTube OAuth token
-		       peertubeHelpers.logger.info(`[checkVideoExists] PeerTube OAuth token expired for sniffer ${snifferId}, refreshing automatically...`);
-		       const sniffers = (await storageManager.getData('sniffers')) || {};
-		       const snifferEntry = sniffers[snifferId];
-		       if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-			       try {
-				       const { decrypt } = require('./lib/secure-store.js');
-				       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-				       const decryptedPassword = decrypt(password);
-				       const newToken = await getPeerTubeToken({
-					       username: snifferEntry.peertubeUsername,
-					       password: decryptedPassword,
-					       peertubeHelpers,
-					       settingsManager
-				       });
-				       snifferEntry.oauthToken = newToken;
-				       sniffers[snifferId] = snifferEntry;
-				       await storageManager.storeData('sniffers', sniffers);
-				       peertubeHelpers.logger.info(`[checkVideoExists] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-				       // Retry with new token
-				       res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-					       headers: { 'Authorization': `Bearer ${newToken}` }
-				       });
-			       } catch (decryptErr) {
-				       peertubeHelpers.logger.error(`[checkVideoExists] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
-				       const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
-				       error.code = 'REAUTH_REQUIRED';
-				       throw error;
-			       }
-		       }
-	       }
-	       return res.status === 200;
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	let res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+		headers: { 'Authorization': `Bearer ${oauthToken}` }
+	});
+	if (res.status === 401 && snifferId && storageManager) {
+		// Automatically refresh PeerTube OAuth token
+		peertubeHelpers.logger.info(`[checkVideoExists] PeerTube OAuth token expired for sniffer ${snifferId}, refreshing automatically...`);
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
+			try {
+				const { decrypt } = require('./lib/secure-store.js');
+				const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+				const decryptedPassword = decrypt(password);
+				const newToken = await getPeerTubeToken({
+					username: snifferEntry.peertubeUsername,
+					password: decryptedPassword,
+					peertubeHelpers,
+					settingsManager
+				});
+				snifferEntry.oauthToken = newToken;
+				sniffers[snifferId] = snifferEntry;
+				await storageManager.storeData('sniffers', sniffers);
+				peertubeHelpers.logger.info(`[checkVideoExists] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+				// Retry with new token
+				res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+					headers: { 'Authorization': `Bearer ${newToken}` }
+				});
+			} catch (decryptErr) {
+				peertubeHelpers.logger.error(`[checkVideoExists] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+				const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+				error.code = 'REAUTH_REQUIRED';
+				throw error;
+			}
+		}
+	}
+	return res.status === 200;
 }
 
 // Helper: Get video title
 async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null) {
-	       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-	       let res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-		       headers: { 'Authorization': `Bearer ${oauthToken}` }
-	       });
-	       if (res.status === 401 && snifferId && storageManager) {
-		       // Automatically refresh PeerTube OAuth token
-		       peertubeHelpers.logger.info(`[getVideoTitle] PeerTube OAuth token expired for sniffer ${snifferId}, refreshing automatically...`);
-		       const sniffers = (await storageManager.getData('sniffers')) || {};
-		       const snifferEntry = sniffers[snifferId];
-		       if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-			       try {
-				       const { decrypt } = require('./lib/secure-store.js');
-				       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-				       const decryptedPassword = decrypt(password);
-				       const newToken = await getPeerTubeToken({
-					       username: snifferEntry.peertubeUsername,
-					       password: decryptedPassword,
-					       peertubeHelpers,
-					       settingsManager
-				       });
-				       snifferEntry.oauthToken = newToken;
-				       sniffers[snifferId] = snifferEntry;
-				       await storageManager.storeData('sniffers', sniffers);
-				       peertubeHelpers.logger.info(`[getVideoTitle] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-				       // Retry with new token
-				       res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
-					       headers: { 'Authorization': `Bearer ${newToken}` }
-				       });
-			       } catch (decryptErr) {
-				       peertubeHelpers.logger.error(`[getVideoTitle] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
-				       const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
-				       error.code = 'REAUTH_REQUIRED';
-				       throw error;
-			       }
-		       }
-	       }
-	       if (!res.ok) throw new Error(`Failed to fetch video title: ${res.status}`);
-	       const data = await res.json();
-	       return data.name;
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	let res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+		headers: { 'Authorization': `Bearer ${oauthToken}` }
+	});
+	if (res.status === 401 && snifferId && storageManager) {
+		// Automatically refresh PeerTube OAuth token
+		peertubeHelpers.logger.info(`[getVideoTitle] PeerTube OAuth token expired for sniffer ${snifferId}, refreshing automatically...`);
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
+			try {
+				const { decrypt } = require('./lib/secure-store.js');
+				const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+				const decryptedPassword = decrypt(password);
+				const newToken = await getPeerTubeToken({
+					username: snifferEntry.peertubeUsername,
+					password: decryptedPassword,
+					peertubeHelpers,
+					settingsManager
+				});
+				snifferEntry.oauthToken = newToken;
+				sniffers[snifferId] = snifferEntry;
+				await storageManager.storeData('sniffers', sniffers);
+				peertubeHelpers.logger.info(`[getVideoTitle] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+				// Retry with new token
+				res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+					headers: { 'Authorization': `Bearer ${newToken}` }
+				});
+			} catch (decryptErr) {
+				peertubeHelpers.logger.error(`[getVideoTitle] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+				const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+				error.code = 'REAUTH_REQUIRED';
+				throw error;
+			}
+		}
+	}
+	if (!res.ok) throw new Error(`Failed to fetch video title: ${res.status}`);
+	const data = await res.json();
+	return data.name;
 }
 
 // Helper: Parse tags from HUDL team data
@@ -200,25 +200,20 @@ async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManag
 // teamLevel: "VARSITY", "JUNIOR_VARSITY", "FRESHMAN", "OTHER", or null
 function parseTeamTags(gender, teamLevel, sport) {
 	const tags = [];
-	
+
 	// Gender tags (match sniffer's displayGender conversion)
 	if (gender === 'MENS') tags.push('Boys');
 	else if (gender === 'WOMENS') tags.push('Girls');
 	else if (gender === 'COED') tags.push('Coed');
-	
+
 	// Level tags (match sniffer's displayLevel conversion)
 	if (teamLevel === 'VARSITY') tags.push('Varsity');
-	else if (teamLevel === 'JUNIOR_VARSITY') tags.push('JV');
+	else if (teamLevel === 'JUNIOR_VARSITY') tags.push('Junior Varsity');
 	else if (teamLevel === 'FRESHMAN') tags.push('Freshman');
 	// Skip "OTHER" - team name usually contains level
-	
-	// Sport tag
-	if (sport) tags.push(sport);
-	
-	// Generic tags
-	tags.push('Live');
-	tags.push('Game');
-	
+
+	// Sport is not included in tags - it's defined by the channel
+
 	return tags;
 }
 
@@ -226,119 +221,136 @@ function parseTeamTags(gender, teamLevel, sport) {
 // Note: PeerTube licence IDs: 1=Attribution, 2=Attribution-ShareAlike, 3=Attribution-NoDerivs,
 //       4=Attribution-NonCommercial, 5=Attribution-NonCommercial-ShareAlike,
 //       6=Attribution-NonCommercial-NoDerivs, 7=Public Domain Dedication
-async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, tags, language, licence, commentsEnabled, downloadEnabled, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null }) {
-		       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-		       const body = {
-			       channelId,
-			       name,
-			       description,
-			       category,
-			       privacy,
-			       permanentLive: true,
-		       saveReplay: false
-	       };
-	       
-	       // Optional fields
-	       if (tags && Array.isArray(tags) && tags.length > 0) body.tags = tags;
-	       if (language) body.language = language;
-	       if (licence !== undefined) body.licence = licence;
-	       if (commentsEnabled !== undefined) body.commentsEnabled = commentsEnabled;
-	       if (downloadEnabled !== undefined) body.downloadEnabled = downloadEnabled;
-	       
-		       let res = await fetch(`${baseUrl}/api/v1/videos/live`, {
-			       method: 'POST',
-			       headers: {
-				       'Authorization': `Bearer ${oauthToken}`,
-				       'Content-Type': 'application/json'
-			       },
-			       body: JSON.stringify(body)
-		       });
-		       if (res.status === 401 && snifferId && storageManager) {
-			       // Automatically refresh PeerTube OAuth token
-			       peertubeHelpers.logger.info(`[createPeerTubeLiveVideo] PeerTube OAuth token expired for sniffer ${snifferId}, refreshing automatically...`);
-			       const sniffers = (await storageManager.getData('sniffers')) || {};
-			       const snifferEntry = sniffers[snifferId];
-			       if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
-				       try {
-					       const { decrypt } = require('./lib/secure-store.js');
-					       const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
-					       const decryptedPassword = decrypt(password);
-					       const newToken = await getPeerTubeToken({
-						       username: snifferEntry.peertubeUsername,
-						       password: decryptedPassword,
-						       peertubeHelpers,
-						       settingsManager
-					       });
-					       snifferEntry.oauthToken = newToken;
-					       sniffers[snifferId] = snifferEntry;
-					       await storageManager.storeData('sniffers', sniffers);
-					       peertubeHelpers.logger.info(`[createPeerTubeLiveVideo] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
-					       // Retry with new token
-					       res = await fetch(`${baseUrl}/api/v1/videos/live`, {
-						       method: 'POST',
-						       headers: {
-							       'Authorization': `Bearer ${newToken}`,
-							       'Content-Type': 'application/json'
-						       },
-						       body: JSON.stringify(body)
-					       });
-				       } catch (decryptErr) {
-					       peertubeHelpers.logger.error(`[createPeerTubeLiveVideo] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
-					       const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
-					       error.code = 'REAUTH_REQUIRED';
-					       throw error;
-				       }
-	       }
-	       }
-	       if (!res.ok) throw new Error(`Failed to create permanent live: ${res.status} ${await res.text()}`);
-	       const data = await res.json();
+async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, tags, language, licence, commentsEnabled, downloadEnabled, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null, thumbnailPath = null }) {
+	const fs = require('fs');
+	const FormData = require('form-data');
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	const form = new FormData();
 
-	       // If token was refreshed, use the new one for subsequent calls
-	       let currentToken = oauthToken;
-	       if (res.status === 200 && snifferId && storageManager) {
-		       const sniffers = (await storageManager.getData('sniffers')) || {};
-		       const snifferEntry = sniffers[snifferId];
-		       if (snifferEntry && snifferEntry.oauthToken) {
-			       currentToken = snifferEntry.oauthToken;
-		       }
-	       }
+	// Required fields
+	form.append('channelId', channelId);
+	form.append('name', name);
+	form.append('permanentLive', 'true');
+	form.append('saveReplay', 'true');
 
-	       // Fetch live stream details to get RTMP credentials
-	       const liveDetailsRes = await fetch(`${baseUrl}/api/v1/videos/live/${data.video.id}`, {
-		       headers: { 'Authorization': `Bearer ${currentToken}` }
-	       });
-	       if (!liveDetailsRes.ok) throw new Error(`Failed to fetch live stream details: ${liveDetailsRes.status} ${await liveDetailsRes.text()}`);
-	       const liveDetails = await liveDetailsRes.json();
+	// Set replay privacy to match the live video privacy (or default to public if not specified)
+	const replayPrivacy = privacy !== undefined ? privacy : 1; // 1 = Public
+	form.append('replaySettings[privacy]', replayPrivacy);
 
-	   // If a thumbnailPath is provided and is a non-empty string, upload it as the video thumbnail
-	   if (typeof thumbnailPath === 'string' && thumbnailPath.length > 0) {
-		   const fs = require('fs');
-		   const FormData = require('form-data');
-		   const form = new FormData();
-		   form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
-		   const patchRes = await fetch(`${baseUrl}/api/v1/videos/${data.video.id}/thumbnail`, {
-			   method: 'POST',
-			   headers: {
-				   'Authorization': `Bearer ${currentToken}`,
-				   ...form.getHeaders()
-			   },
-			   body: form
-		   });
-		   if (!patchRes.ok) {
-			   // Log but do not throw, so stream creation still succeeds
-			   console.warn(`[PLUGIN] Failed to upload thumbnail for video ${data.video.id}: ${patchRes.status} ${await patchRes.text()}`);
-		   }
-	   }
+	// Optional metadata fields
+	if (description) form.append('description', description);
+	if (category !== undefined) form.append('category', category);
+	if (privacy !== undefined) form.append('privacy', privacy);
+	if (tags && Array.isArray(tags) && tags.length > 0) {
+		tags.forEach(tag => form.append('tags[]', tag));
+	}
+	if (language) form.append('language', language);
+	if (licence !== undefined) form.append('licence', licence);
+	if (commentsEnabled !== undefined) form.append('commentsEnabled', commentsEnabled);
+	if (downloadEnabled !== undefined) form.append('downloadEnabled', downloadEnabled);
 
-	       // Fetch video details to get the video name/title
-	       const videoDetailsRes = await fetch(`${baseUrl}/api/v1/videos/${data.video.id}`, {
-		       headers: { 'Authorization': `Bearer ${currentToken}` }
-	       });
-	       let videoName = 'Live Stream';
-	       if (videoDetailsRes.ok) {
-		       const videoDetails = await videoDetailsRes.json();
-		       videoName = videoDetails.name || videoName;
-	       }
+	// Add thumbnail if provided and exists
+	if (thumbnailPath && typeof thumbnailPath === 'string' && thumbnailPath.length > 0) {
+		if (fs.existsSync(thumbnailPath)) {
+			form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
+			console.log(`[PLUGIN] Including thumbnail in live video creation: ${thumbnailPath}`);
+		} else {
+			console.warn(`[PLUGIN] Thumbnail file not found at path: ${thumbnailPath}`);
+		}
+	}
+
+	let res = await fetch(`${baseUrl}/api/v1/videos/live`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${oauthToken}`,
+			...form.getHeaders()
+		},
+		body: form
+	});
+	if (res.status === 401 && snifferId && storageManager) {
+		// Automatically refresh PeerTube OAuth token
+		peertubeHelpers.logger.info(`[createPeerTubeLiveVideo] PeerTube OAuth token expired for sniffer ${snifferId}, refreshing automatically...`);
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		if (snifferEntry && snifferEntry.peertubeUsername && snifferEntry.peertubePassword) {
+			try {
+				const { decrypt } = require('./lib/secure-store.js');
+				const password = typeof snifferEntry.peertubePassword === 'string' ? snifferEntry.peertubePassword : '';
+				const decryptedPassword = decrypt(password);
+				const newToken = await getPeerTubeToken({
+					username: snifferEntry.peertubeUsername,
+					password: decryptedPassword,
+					peertubeHelpers,
+					settingsManager
+				});
+				snifferEntry.oauthToken = newToken;
+				sniffers[snifferId] = snifferEntry;
+				await storageManager.storeData('sniffers', sniffers);
+				peertubeHelpers.logger.info(`[createPeerTubeLiveVideo] PeerTube OAuth token refreshed successfully for sniffer ${snifferId}`);
+				// Retry with new token - rebuild FormData with new token
+				const retryForm = new FormData();
+				retryForm.append('name', body.name);
+				retryForm.append('channelId', body.channelId);
+				retryForm.append('privacy', body.privacy);
+				retryForm.append('category', body.category);
+				if (body.language) retryForm.append('language', body.language);
+				if (body.description) retryForm.append('description', body.description);
+				if (body.tags && Array.isArray(body.tags)) {
+					body.tags.forEach(tag => retryForm.append('tags[]', tag));
+				}
+				retryForm.append('permanentLive', body.permanentLive);
+				retryForm.append('saveReplay', body.saveReplay); const replayPrivacy = privacy !== undefined ? privacy : 1;
+				retryForm.append('replaySettings[privacy]', replayPrivacy); if (thumbnailPath) {
+					const fs = require('fs');
+					if (fs.existsSync(thumbnailPath)) {
+						retryForm.append('thumbnailfile', fs.createReadStream(thumbnailPath));
+					}
+				}
+				res = await fetch(`${baseUrl}/api/v1/videos/live`, {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${newToken}`,
+						...retryForm.getHeaders()
+					},
+					body: retryForm
+				});
+			} catch (decryptErr) {
+				peertubeHelpers.logger.error(`[createPeerTubeLiveVideo] Failed to decrypt stored credentials for sniffer ${snifferId}: ${decryptErr.message}`);
+				const error = new Error('REAUTH_REQUIRED: Stored credentials cannot be decrypted');
+				error.code = 'REAUTH_REQUIRED';
+				throw error;
+			}
+		}
+	}
+	if (!res.ok) throw new Error(`Failed to create permanent live: ${res.status} ${await res.text()}`);
+	const data = await res.json();
+
+	// If token was refreshed, use the new one for subsequent calls
+	let currentToken = oauthToken;
+	if (res.status === 200 && snifferId && storageManager) {
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		if (snifferEntry && snifferEntry.oauthToken) {
+			currentToken = snifferEntry.oauthToken;
+		}
+	}
+
+	// Fetch live stream details to get RTMP credentials
+	const liveDetailsRes = await fetch(`${baseUrl}/api/v1/videos/live/${data.video.id}`, {
+		headers: { 'Authorization': `Bearer ${currentToken}` }
+	});
+	if (!liveDetailsRes.ok) throw new Error(`Failed to fetch live stream details: ${liveDetailsRes.status} ${await liveDetailsRes.text()}`);
+	const liveDetails = await liveDetailsRes.json();
+
+	// Fetch video details to get the video name/title
+	const videoDetailsRes = await fetch(`${baseUrl}/api/v1/videos/${data.video.id}`, {
+		headers: { 'Authorization': `Bearer ${currentToken}` }
+	});
+	let videoName = 'Live Stream';
+	if (videoDetailsRes.ok) {
+		const videoDetails = await videoDetailsRes.json();
+		videoName = videoDetails.name || videoName;
+	}
 
 	return {
 		id: data.video.id,
@@ -361,99 +373,109 @@ async function updateCameraAssignment(snifferId, cameraId, updates, storageManag
 // Main function: getOrCreatePermanentLiveStream (now team-based)
 async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, peertubeOAuthToken, peertubeHelpers, settingsManager, storageManager) {
 	try {
-	// STEP 1: Check if permanent live already exists for this team
-	       if (teamSettings.permanentLiveVideoId) {
-		       const exists = await checkVideoExists(teamSettings.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
-		       if (exists) {
-			       // Get current title
-			       const videoTitle = await getVideoTitle(teamSettings.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
-			       
-			       // Update video metadata (title, description, category, privacy, tags, language, licence) if provided
-			       const updateData = {};
-			       if (teamSettings.streamTitle) updateData.name = teamSettings.streamTitle;
-			       if (teamSettings.streamDescription !== undefined) updateData.description = teamSettings.streamDescription;
-			       if (teamSettings.category !== undefined) updateData.category = teamSettings.category;
-			       if (teamSettings.privacy !== undefined) updateData.privacy = teamSettings.privacy;
-			       if (teamSettings.tags && Array.isArray(teamSettings.tags) && teamSettings.tags.length > 0) updateData.tags = teamSettings.tags;
-			       if (teamSettings.language) updateData.language = teamSettings.language;
-			       if (teamSettings.licence !== undefined) updateData.licence = teamSettings.licence;
-			       
-			       if (Object.keys(updateData).length > 0) {
-				       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-				       const updateRes = await fetch(`${baseUrl}/api/v1/videos/${teamSettings.permanentLiveVideoId}`, {
-					       method: 'PUT',
-					       headers: {
-						       'Authorization': `Bearer ${peertubeOAuthToken}`,
-						       'Content-Type': 'application/json'
-					       },
-					       body: JSON.stringify(updateData)
-				       });
-				       if (!updateRes.ok) {
-					       console.warn(`[PLUGIN] Failed to update metadata for video ${teamSettings.permanentLiveVideoId}: ${updateRes.status} ${await updateRes.text()}`);
-				       } else {
-					       console.log(`[PLUGIN] Updated metadata for video ${teamSettings.permanentLiveVideoId}:`, updateData);
-				       }
-			       }
-			       
-			       // Update thumbnail if provided (for HUDL game matching)
-			       const thumbnailPath = teamSettings.thumbnailPath;
-			       if (typeof thumbnailPath === 'string' && thumbnailPath.length > 0) {
-				       const fs = require('fs');
-				       const FormData = require('form-data');
-				       const form = new FormData();
-				       form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
-				       const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
-				       const patchRes = await fetch(`${baseUrl}/api/v1/videos/${teamSettings.permanentLiveVideoId}/thumbnail`, {
-					       method: 'POST',
-					       headers: {
-						       'Authorization': `Bearer ${peertubeOAuthToken}`,
-						       ...form.getHeaders()
-					       },
-					       body: form
-				       });
-				       if (!patchRes.ok) {
-					       console.warn(`[PLUGIN] Failed to upload thumbnail for existing video ${teamSettings.permanentLiveVideoId}: ${patchRes.status} ${await patchRes.text()}`);
-				       } else {
-					       console.log(`[PLUGIN] Updated thumbnail for existing video ${teamSettings.permanentLiveVideoId}`);
-				       }
-			       }
-			       		       // Check if playlist exists for this season
-								if (teamSettings.seasonYear) {
-									if (!teamSettings.seasons) {
-										teamSettings.seasons = {};
-									}
-									const seasonData = teamSettings.seasons[teamSettings.seasonYear];
-									if (!seasonData || !seasonData.playlistId) {
-										// Create new playlist for this season
-										const nextYear = parseInt(teamSettings.seasonYear) + 1;
-										const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
-										const newPlaylist = await createPlaylist({
-											channelId: teamSettings.channelId,
-											displayName: playlistDisplayName,
-											description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
-											privacy: teamSettings.privacy,
-											oauthToken: peertubeOAuthToken,
-											peertubeHelpers,
-											settingsManager
-										});
-										teamSettings.seasons[teamSettings.seasonYear] = {
-											seasonYear: teamSettings.seasonYear,
-											playlistId: newPlaylist.playlistId,
-											playlistName: newPlaylist.displayName
-										};
-										await updateTeamPermanentLive(snifferId, teamId, {
-											seasons: teamSettings.seasons
-										}, storageManager);
-									}
-								}
-		       				       return {
-					       videoId: teamSettings.permanentLiveVideoId,
-					       rtmpUrl: teamSettings.permanentLiveRtmpUrl,
-					       streamKey: teamSettings.permanentLiveStreamKey,
-					       isNew: false,
-					       videoTitle: teamSettings.streamTitle || videoTitle
-				       };
-			       } else {
+		// STEP 1: Check if permanent live already exists for this team
+		if (teamSettings.permanentLiveVideoId) {
+			const exists = await checkVideoExists(teamSettings.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+			if (exists) {
+				// Get current title
+				const videoTitle = await getVideoTitle(teamSettings.permanentLiveVideoId, peertubeOAuthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
+
+				// Update video metadata and thumbnail using multipart/form-data
+				const thumbnailPath = teamSettings.thumbnailPath;
+				const hasThumbnail = typeof thumbnailPath === 'string' && thumbnailPath.length > 0;
+				const hasMetadata = teamSettings.streamTitle ||
+					teamSettings.streamDescription !== undefined ||
+					teamSettings.category !== undefined ||
+					teamSettings.privacy !== undefined ||
+					(teamSettings.tags && Array.isArray(teamSettings.tags) && teamSettings.tags.length > 0) ||
+					teamSettings.language ||
+					teamSettings.licence !== undefined;
+
+				if (hasMetadata || hasThumbnail) {
+					const fs = require('fs');
+					const FormData = require('form-data');
+					const form = new FormData();
+					const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+
+					// Add metadata fields
+					if (teamSettings.streamTitle) form.append('name', teamSettings.streamTitle);
+					if (teamSettings.streamDescription !== undefined) form.append('description', teamSettings.streamDescription);
+					if (teamSettings.category !== undefined) form.append('category', teamSettings.category);
+					if (teamSettings.privacy !== undefined) form.append('privacy', teamSettings.privacy);
+					if (teamSettings.tags && Array.isArray(teamSettings.tags) && teamSettings.tags.length > 0) {
+						teamSettings.tags.forEach(tag => form.append('tags[]', tag));
+					}
+					if (teamSettings.language) form.append('language', teamSettings.language);
+					if (teamSettings.licence !== undefined) form.append('licence', teamSettings.licence);
+
+					// Add thumbnail file if provided and exists
+					if (hasThumbnail && fs.existsSync(thumbnailPath)) {
+						form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
+						console.log(`[PLUGIN] Including thumbnail in video update: ${thumbnailPath}`);
+					} else if (hasThumbnail) {
+						console.warn(`[PLUGIN] Thumbnail file not found at path: ${thumbnailPath}`);
+					}
+
+					const updateRes = await fetch(`${baseUrl}/api/v1/videos/${teamSettings.permanentLiveVideoId}`, {
+						method: 'PUT',
+						headers: {
+							'Authorization': `Bearer ${peertubeOAuthToken}`,
+							...form.getHeaders()
+						},
+						body: form
+					});
+
+					if (!updateRes.ok) {
+						const errorText = await updateRes.text();
+						console.warn(`[PLUGIN] Failed to update video ${teamSettings.permanentLiveVideoId}: ${updateRes.status} ${errorText}`);
+					} else {
+						console.log(`[PLUGIN] Successfully updated video ${teamSettings.permanentLiveVideoId}`);
+					}
+				}
+				// Check if playlist exists for this season
+				if (teamSettings.seasonYear) {
+					console.log(`[PLUGIN] Checking playlist for team ${teamSettings.teamName}, season ${teamSettings.seasonYear}`);
+					if (!teamSettings.seasons) {
+						teamSettings.seasons = {};
+					}
+					const seasonData = teamSettings.seasons[teamSettings.seasonYear];
+					if (!seasonData || !seasonData.playlistId) {
+						// Create new playlist for this season
+						const nextYear = parseInt(teamSettings.seasonYear) + 1;
+						const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
+						console.log(`[PLUGIN] Creating new playlist: ${playlistDisplayName}`);
+						const newPlaylist = await createPlaylist({
+							channelId: teamSettings.channelId,
+							displayName: playlistDisplayName,
+							description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
+							privacy: teamSettings.privacy,
+							oauthToken: peertubeOAuthToken,
+							peertubeHelpers,
+							settingsManager
+						});
+						teamSettings.seasons[teamSettings.seasonYear] = {
+							seasonYear: teamSettings.seasonYear,
+							playlistId: newPlaylist.playlistId,
+							playlistName: newPlaylist.displayName
+						};
+						console.log(`[PLUGIN] Playlist created successfully: ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
+						await updateTeamPermanentLive(snifferId, teamId, {
+							seasons: teamSettings.seasons
+						}, storageManager);
+					} else {
+						console.log(`[PLUGIN] Playlist already exists for season ${teamSettings.seasonYear}: ${seasonData.playlistName} (ID: ${seasonData.playlistId})`);
+					}
+				} else {
+					console.log('[PLUGIN] No seasonYear provided, skipping playlist creation');
+				}
+				return {
+					videoId: teamSettings.permanentLiveVideoId,
+					rtmpUrl: teamSettings.permanentLiveRtmpUrl,
+					streamKey: teamSettings.permanentLiveStreamKey,
+					isNew: false,
+					videoTitle: teamSettings.streamTitle || videoTitle
+				};
+			} else {
 				// Clean up deleted video reference
 				await updateTeamPermanentLive(snifferId, teamId, {
 					permanentLiveVideoId: null,
@@ -462,16 +484,16 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 				}, storageManager);
 			}
 		}
-	// STEP 2: Create new permanent live video for this team
-	const name = teamSettings.streamTitle || `${teamSettings.teamName} - Live`;
-	const description = teamSettings.streamDescription || `Live stream for ${teamSettings.teamName}`;
-	const channelId = teamSettings.channelId;
-	const category = teamSettings.category;
-	const privacy = teamSettings.privacy;
-	const tags = teamSettings.tags;
-	const language = teamSettings.language;
-	const licence = teamSettings.licence;
-	const thumbnailPath = typeof teamSettings.thumbnailPath !== 'undefined' ? teamSettings.thumbnailPath : undefined;
+		// STEP 2: Create new permanent live video for this team
+		const name = teamSettings.streamTitle || `${teamSettings.teamName} - Live`;
+		const description = teamSettings.streamDescription || `Live stream for ${teamSettings.teamName}`;
+		const channelId = teamSettings.channelId;
+		const category = teamSettings.category;
+		const privacy = teamSettings.privacy;
+		const tags = teamSettings.tags;
+		const language = teamSettings.language;
+		const licence = teamSettings.licence;
+		const thumbnailPath = typeof teamSettings.thumbnailPath !== 'undefined' ? teamSettings.thumbnailPath : undefined;
 		const newVideo = await createPeerTubeLiveVideo({
 			channelId,
 			name,
@@ -489,50 +511,57 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 			thumbnailPath
 		});
 		if (!newVideo) {
-				console.error('[PLUGIN] PeerTube live video API returned undefined!');
-				throw new Error('PeerTube live video API returned undefined');
-			}
-			if (!newVideo.rtmpUrl || !newVideo.streamKey) {
-				console.error('[PLUGIN] PeerTube live video API response missing rtmpUrl or streamKey:', newVideo);
-				throw new Error('PeerTube live video API response missing rtmpUrl or streamKey');
-			}
+			console.error('[PLUGIN] PeerTube live video API returned undefined!');
+			throw new Error('PeerTube live video API returned undefined');
+		}
+		if (!newVideo.rtmpUrl || !newVideo.streamKey) {
+			console.error('[PLUGIN] PeerTube live video API response missing rtmpUrl or streamKey:', newVideo);
+			throw new Error('PeerTube live video API response missing rtmpUrl or streamKey');
+		}
 		// STEP 3: Store credentials in team mapping
 		await updateTeamPermanentLive(snifferId, teamId, {
 			permanentLiveVideoId: newVideo.id,
 			permanentLiveRtmpUrl: newVideo.rtmpUrl,
 			permanentLiveStreamKey: newVideo.streamKey,
 			permanentLiveCreatedAt: new Date().toISOString()
-		}, storageManager);	
-	// Check if playlist exists for this season
-	if (teamSettings.seasonYear) {
-		if (!teamSettings.seasons) {
-			teamSettings.seasons = {};
+		}, storageManager);
+		// Check if playlist exists for this season
+		if (teamSettings.seasonYear) {
+			console.log(`[PLUGIN] Checking playlist for team ${teamSettings.teamName}, season ${teamSettings.seasonYear}`);
+			if (!teamSettings.seasons) {
+				teamSettings.seasons = {};
+			}
+			const seasonData = teamSettings.seasons[teamSettings.seasonYear];
+			if (!seasonData || !seasonData.playlistId) {
+				// Create new playlist for this season
+				const nextYear = parseInt(teamSettings.seasonYear) + 1;
+				const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
+				console.log(`[PLUGIN] Creating new playlist: ${playlistDisplayName}`);
+				const newPlaylist = await createPlaylist({
+					channelId: teamSettings.channelId,
+					displayName: playlistDisplayName,
+					description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
+					privacy: teamSettings.privacy,
+					oauthToken: peertubeOAuthToken,
+					peertubeHelpers,
+					settingsManager
+				});
+				teamSettings.seasons[teamSettings.seasonYear] = {
+					seasonYear: teamSettings.seasonYear,
+					playlistId: newPlaylist.playlistId,
+					playlistName: newPlaylist.displayName
+				};
+				console.log(`[PLUGIN] Playlist created successfully: ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
+				await updateTeamPermanentLive(snifferId, teamId, {
+					seasons: teamSettings.seasons
+				}, storageManager);
+			} else {
+				console.log(`[PLUGIN] Playlist already exists for season ${teamSettings.seasonYear}: ${seasonData.playlistName} (ID: ${seasonData.playlistId})`);
+			}
+		} else {
+			console.log('[PLUGIN] No seasonYear provided, skipping playlist creation');
 		}
-		const seasonData = teamSettings.seasons[teamSettings.seasonYear];
-		if (!seasonData || !seasonData.playlistId) {
-			// Create new playlist for this season
-			const nextYear = parseInt(teamSettings.seasonYear) + 1;
-			const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
-			const newPlaylist = await createPlaylist({
-				channelId: teamSettings.channelId,
-				displayName: playlistDisplayName,
-				description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
-				privacy: teamSettings.privacy,
-				oauthToken: peertubeOAuthToken,
-				peertubeHelpers,
-				settingsManager
-			});
-			teamSettings.seasons[teamSettings.seasonYear] = {
-				seasonYear: teamSettings.seasonYear,
-				playlistId: newPlaylist.playlistId,
-				playlistName: newPlaylist.displayName
-			};
-			await updateTeamPermanentLive(snifferId, teamId, {
-				seasons: teamSettings.seasons
-			}, storageManager);
-		}
-	}
-			// STEP 4: Return new credentials
+		// STEP 4: Return new credentials
 		return {
 			videoId: newVideo.id,
 			rtmpUrl: newVideo.rtmpUrl,
@@ -614,7 +643,7 @@ async function createPlaylist({ channelId, displayName, description, privacy, oa
 		videoChannelId: channelId
 	};
 	if (description) body.description = description;
-	
+
 	const res = await fetch(`${baseUrl}/api/v1/video-playlists`, {
 		method: 'POST',
 		headers: {
@@ -623,15 +652,15 @@ async function createPlaylist({ channelId, displayName, description, privacy, oa
 		},
 		body: JSON.stringify(body)
 	});
-	
+
 	if (!res.ok) {
 		throw new Error(`Failed to create playlist: ${res.status} ${await res.text()}`);
 	}
-	
+
 	const data = await res.json();
 	return {
 		playlistId: data.videoPlaylist.id,
-		displayName: data.videoPlaylist.displayName
+		displayName: data.videoPlaylist.displayName || displayName // Fallback to input if API doesn't return it
 	};
 }
 
@@ -639,7 +668,7 @@ async function createPlaylist({ channelId, displayName, description, privacy, oa
 async function addVideoToPlaylist({ playlistId, videoId, oauthToken, peertubeHelpers, settingsManager }) {
 	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
 	const body = { videoId };
-	
+
 	const res = await fetch(`${baseUrl}/api/v1/video-playlists/${playlistId}/videos`, {
 		method: 'POST',
 		headers: {
@@ -648,9 +677,29 @@ async function addVideoToPlaylist({ playlistId, videoId, oauthToken, peertubeHel
 		},
 		body: JSON.stringify(body)
 	});
-	
+
 	if (!res.ok) {
 		throw new Error(`Failed to add video to playlist: ${res.status} ${await res.text()}`);
+	}
+
+	return true;
+}
+
+// Update video metadata (name, description, etc.)
+async function updateVideoMetadata({ videoId, updates, oauthToken, peertubeHelpers, settingsManager }) {
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+	
+	const res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+		method: 'PUT',
+		headers: {
+			'Authorization': `Bearer ${oauthToken}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(updates)
+	});
+	
+	if (!res.ok) {
+		throw new Error(`Failed to update video metadata: ${res.status} ${await res.text()}`);
 	}
 	
 	return true;
@@ -667,6 +716,7 @@ module.exports = {
 	parseTeamTags,
 	createPlaylist,
 	addVideoToPlaylist,
+	updateVideoMetadata,
 	checkVideoExists,
 	getVideoTitle,
 	deleteVideo,

@@ -17,23 +17,23 @@ function checkRateLimit(snifferId) {
 }
 
 async function hudlGraphQL({ query, variables, operationName, snifferId }) {
-		       if (!checkRateLimit(snifferId)) {
-			       console.warn(`[PLUGIN HUDL] Per-sniffer internal rate limit exceeded for snifferId: ${snifferId}`);
-			       throw new Error('HUDL internal rate limit exceeded');
-		       }
-	       const res = await fetch(HUDL_GRAPHQL_URL, {
-		       method: 'POST',
-		       headers: {
-			       'Content-Type': 'application/json',
-			       'Origin': 'https://fan.hudl.com',
-			       'Referer': 'https://fan.hudl.com/'
-		       },
-		       body: JSON.stringify({ query, variables, operationName })
-	       });
-	       if (!res.ok) throw new Error(`HUDL GraphQL external error: ${res.status}`);
-	       const json = await res.json();
-	       if (json.errors) throw new Error('HUDL GraphQL external: ' + json.errors.map(e => e.message).join(', '));
-	       return json.data;
+	if (!checkRateLimit(snifferId)) {
+		console.warn(`[PLUGIN HUDL] Per-sniffer internal rate limit exceeded for snifferId: ${snifferId}`);
+		throw new Error('HUDL internal rate limit exceeded');
+	}
+	const res = await fetch(HUDL_GRAPHQL_URL, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'Origin': 'https://fan.hudl.com',
+			'Referer': 'https://fan.hudl.com/'
+		},
+		body: JSON.stringify({ query, variables, operationName })
+	});
+	if (!res.ok) throw new Error(`HUDL GraphQL external error: ${res.status}`);
+	const json = await res.json();
+	if (json.errors) throw new Error('HUDL GraphQL external: ' + json.errors.map(e => e.message).join(', '));
+	return json.data;
 }
 
 // Extract org ID from HUDL org URL

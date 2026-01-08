@@ -3,7 +3,7 @@
 
 function generateGameTitle(game, teamData, schoolName) {
   if (!game || !teamData) return null;
-  
+
   // Strip "High School", "Junior High", "HS", "JH" suffixes
   const stripSchoolSuffix = (name) => {
     if (!name) return name;
@@ -14,31 +14,31 @@ function generateGameTitle(game, teamData, schoolName) {
       .replace(/\s+JH$/i, '')
       .trim();
   };
-  
+
   // Use school name (e.g., "Elkhorn Valley High School" → "Elkhorn Valley")
   const homeTeam = stripSchoolSuffix(schoolName) || 'Home Team';
-  
+
   // Opponent name (e.g., "Ainsworth High School" → "Ainsworth")
   const opponent = stripSchoolSuffix(game.opponentDetails?.name) || 'Opponent';
-  
+
   // Home vs Away
   const vsOrAt = game.scheduleEntryLocation === 2 ? 'at' : 'vs';
-  
+
   // Format gender: MENS → Mens, WOMENS → Womens, COED → Coed
   const genderMap = { MENS: 'Mens', WOMENS: 'Womens', COED: 'Coed' };
   const gender = genderMap[teamData.gender] || '';
-  
+
   // Format team level: VARSITY → Varsity, JUNIOR_VARSITY → JV, etc.
   const levelMap = { VARSITY: 'Varsity', JUNIOR_VARSITY: 'JV', FRESHMAN: 'Freshman', OTHER: '' };
   const level = levelMap[teamData.teamLevel] || '';
-  
+
   // Format sport: BASKETBALL → Basketball
   const sport = teamData.sport ? teamData.sport.charAt(0) + teamData.sport.slice(1).toLowerCase() : '';
-  
+
   // Build title: "Elkhorn Valley vs Ainsworth Mens Varsity Basketball"
   const metadata = [gender, level, sport].filter(p => p).join(' ');
   const titleParts = [homeTeam, vsOrAt, opponent, metadata].filter(p => p);
-  
+
   return titleParts.join(' ');
 }
 

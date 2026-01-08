@@ -50,7 +50,7 @@ class HudlRateLimiter {
 
 // Singleton instance (shared across all plugin code)
 if (!global.__HUDL_RATE_LIMITER__) {
-  global.__HUDL_RATE_LIMITER__ = new HudlRateLimiter({ minDelayMs: 10000, maxRequestsPerDay: 300 });
+  global.__HUDL_RATE_LIMITER__ = new HudlRateLimiter({ minDelayMs: 10000, maxRequestsPerDay: 200 });
 }
 
 module.exports = global.__HUDL_RATE_LIMITER__;

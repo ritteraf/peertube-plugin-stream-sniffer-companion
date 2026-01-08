@@ -66,20 +66,20 @@ module.exports = function createStatusRouter({ storageManager, settingsManager, 
        router.get('/', async (req, res) => {
               try {
                      if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-                     
+
                      const statusLog = (await storageManager.getData('status')) || {};
                      const snifferIds = Object.keys(statusLog);
                      const sniffers = snifferIds.map(id => sanitizeSnifferStatus(id, statusLog[id]));
-                     
+
                      // Calculate aggregate stats
                      const totalSniffers = sniffers.length;
                      const activeSniffers = sniffers.filter(s => !s.isStale).length;
-                     const streamingSniffers = sniffers.filter(s => 
+                     const streamingSniffers = sniffers.filter(s =>
                             !s.isStale && s.activeStreams && s.activeStreams.some(stream => stream.status === 'streaming')
                      ).length;
-                     
+
                      const pluginVersion = require('./package.json').version;
-                     
+
                      return res.status(200).json({
                             timestamp: new Date().toISOString(),
                             pluginVersion,
@@ -101,16 +101,16 @@ module.exports = function createStatusRouter({ storageManager, settingsManager, 
                      if (!snifferId) {
                             return res.status(400).json({ error: 'snifferId is required' });
                      }
-                     
+
                      if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
-                     
+
                      const statusLog = (await storageManager.getData('status')) || {};
                      const statusData = statusLog[snifferId];
-                     
+
                      if (!statusData) {
                             return res.status(404).json({ error: 'Sniffer not found', snifferId });
                      }
-                     
+
                      const sanitized = sanitizeSnifferStatus(snifferId, statusData);
                      return res.status(200).json(sanitized);
               } catch (err) {
