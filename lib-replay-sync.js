@@ -22,15 +22,16 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			
 			teamsChecked++;
 			
-			// Get current season's playlist
-			const currentYear = new Date().getFullYear();
-			const seasonData = teamData.seasons[currentYear];
+			// Get current season's playlist using the team's season year (not calendar year)
+			// This handles multi-year seasons like Basketball 2025-2026
+			const seasonYear = teamData.currentSeasonYear || new Date().getFullYear();
+			const seasonData = teamData.seasons[seasonYear];
 			
 			if (!seasonData || !seasonData.playlistId) {
 				results.push({
 					team: teamData.teamName,
 					status: 'skipped',
-					reason: 'No playlist for current season'
+					reason: `No playlist for season ${seasonYear}`
 				});
 				continue;
 			}
@@ -91,7 +92,8 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				
 				// Find replays not in playlist
 				// Replays: not live, not the permanent live video itself, created this season
-				const seasonStart = new Date(currentYear, 7, 1); // August 1st
+				// Use July 1st of season year as cutoff (e.g., July 1 2025 for 2025-2026 season)
+				const seasonStart = new Date(seasonYear, 6, 1); // Month 6 = July (0-indexed)
 				const replays = videos.filter(v => 
 					!v.isLive && 
 					v.id !== teamData.permanentLiveVideoId &&
@@ -114,7 +116,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 						
 						replaysAdded++;
 						addedReplays.push(replay.name);
-						console.log(`[PLUGIN] Added replay to playlist: ${replay.name} → ${teamData.teamName} ${currentYear}`);
+						console.log(`[PLUGIN] Added replay to playlist: ${replay.name} → ${teamData.teamName} ${seasonYear}`);
 					} catch (err) {
 						console.error(`[PLUGIN] Failed to add replay ${replay.id} to playlist:`, err.message);
 					}
