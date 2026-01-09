@@ -48,121 +48,9 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
     };
   }
 
-  // Sync replays to playlists - runs during auto-refresh (3x daily)
-  async function syncReplaysToPlaylists() {
-    try {
-      console.log('[PLUGIN] Starting replay-to-playlist sync...');
-      
-      const cameras = (await storageManager.getData('cameras')) || {};
-      const sniffers = (await storageManager.getData('sniffers')) || {};
-      const { addVideoToPlaylist } = require('./lib-peertube-api.js');
-      
-      let teamsChecked = 0;
-      let replaysAdded = 0;
-      
-      for (const teamId in cameras) {
-        const teamData = cameras[teamId];
-        
-        // Skip if no permanent live or no seasons
-        if (!teamData.permanentLiveVideoId || !teamData.seasons) {
-          continue;
-        }
-        
-        teamsChecked++;
-        
-        // Get current season's playlist
-        const currentYear = new Date().getFullYear();
-        const seasonData = teamData.seasons[currentYear];
-        
-        if (!seasonData || !seasonData.playlistId) {
-          continue;
-        }
-        
-        // Find OAuth token for this team
-        let snifferOAuthToken = null;
-        const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
-        
-        for (const snifferId in cameraAssignments) {
-          const assignments = cameraAssignments[snifferId];
-          for (const cameraId in assignments) {
-            if (assignments[cameraId].teamId === teamId) {
-              snifferOAuthToken = sniffers[snifferId]?.oauthToken;
-              break;
-            }
-          }
-          if (snifferOAuthToken) break;
-        }
-        
-        if (!snifferOAuthToken) {
-          console.log(`[PLUGIN] No OAuth token found for team ${teamData.teamName}`);
-          continue;
-        }
-        
-        // Fetch videos from channel
-        const baseUrl = await peertubeHelpers.config.getWebserverUrl();
-        const channelId = teamData.channelId;
-        
-        try {
-          const res = await fetch(`${baseUrl}/api/v1/video-channels/${channelId}/videos?count=50&sort=-publishedAt`, {
-            headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
-          });
-          
-          if (!res.ok) {
-            console.log(`[PLUGIN] Failed to fetch videos for ${teamData.teamName}: ${res.status}`);
-            continue;
-          }
-          
-          const { data: videos } = await res.json();
-          
-          // Get videos already in playlist
-          const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=500`, {
-            headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
-          });
-          
-          const playlistVideos = playlistRes.ok ? (await playlistRes.json()).data : [];
-          const playlistVideoIds = new Set(playlistVideos.map(v => v.video.id));
-          
-          // Find replays not in playlist
-          // Replays: not live, not the permanent live video itself, created this season
-          const seasonStart = new Date(currentYear, 7, 1); // August 1st
-          const replays = videos.filter(v => 
-            !v.isLive && 
-            v.id !== teamData.permanentLiveVideoId &&
-            new Date(v.createdAt) >= seasonStart &&
-            !playlistVideoIds.has(v.id)
-          );
-          
-          // Add replays to playlist
-          for (const replay of replays) {
-            try {
-              await addVideoToPlaylist({
-                playlistId: seasonData.playlistId,
-                videoId: replay.id,
-                oauthToken: snifferOAuthToken,
-                peertubeHelpers,
-                settingsManager
-              });
-              
-              replaysAdded++;
-              console.log(`[PLUGIN] Added replay to playlist: ${replay.name} → ${teamData.teamName} ${currentYear}`);
-            } catch (err) {
-              console.error(`[PLUGIN] Failed to add replay ${replay.id} to playlist:`, err.message);
-            }
-          }
-          
-        } catch (err) {
-          console.error(`[PLUGIN] Error syncing replays for ${teamData.teamName}:`, err);
-        }
-      }
-      
-      console.log(`[PLUGIN] Replay sync complete: checked ${teamsChecked} teams, added ${replaysAdded} replays to playlists`);
-      
-    } catch (err) {
-      console.error('[PLUGIN] Error in syncReplaysToPlaylists:', err);
-    }
-  }
-
   const hudlLimiter = require('./lib-hudl-rate-limiter.js');
+  const { syncReplaysToPlaylists, resetPermanentLiveTitles } = require('./lib-replay-sync.js');
+  
   async function autoRefreshHudlSchedules() {
     try {
       const settings = await getPluginSettings();
@@ -228,37 +116,16 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
       console.log(`[PLUGIN HUDL auto-refresh] Matchups parsed: ${matchupCount}`);
       
       // Sync replays to playlists after schedule refresh
-      await syncReplaysToPlaylists();
+      await syncReplaysToPlaylists({ storageManager, peertubeHelpers, settingsManager });
+      
+      // Reset permanent live titles to generic format
+      await resetPermanentLiveTitles({ storageManager, peertubeHelpers, settingsManager });
       
       // After storing schedules, trigger image generation in background
-      setImmediate(() => {
-        const { generateMatchupThumbnail } = require('./lib-matchup-thumbnail.js');
-        const fs = require('fs');
-        const path = require('path');
-        const { getMatchupKey, THUMBNAIL_DIR } = require('./lib-matchup-thumbnail.js');
-        let imageCacheHits = 0;
-        let imageGenerated = 0;
-        for (const team of teamHeaders) {
-          const games = schedules[team.id]?.games || [];
-          for (const g of games) {
-            const homeId = team.id || 'no_logo';
-            const homeLogo = team.logo || null;
-            const awayId = (g.opponentDetails && g.opponentDetails.schoolId) || 'no_logo';
-            const awayLogo = (g.opponentDetails && g.opponentDetails.profileImageUri) || null;
-            const matchupKey = getMatchupKey(homeId, awayId);
-            const thumbnailPath = path.join(THUMBNAIL_DIR, matchupKey);
-            if (fs.existsSync(thumbnailPath)) {
-              imageCacheHits++;
-            } else {
-              generateMatchupThumbnail(homeLogo, awayLogo, homeId, awayId)
-                .then(() => { imageGenerated++; })
-                .catch(thumbErr => {
-                  console.warn(`[PLUGIN HUDL] Failed to generate matchup thumbnail for ${homeId} vs ${awayId}:`, thumbErr.message);
-                });
-            }
-          }
-        }
-        console.log(`[PLUGIN HUDL auto-refresh] Images generated: ${imageGenerated}, images already existed: ${imageCacheHits}`);
+      setImmediate(async () => {
+        const { generateThumbnailsFromSchedules } = require('./lib-thumbnail-generator.js');
+        const result = await generateThumbnailsFromSchedules(schedules);
+        console.log(`[PLUGIN HUDL auto-refresh] Images generated: ${result.generated}, images already existed: ${result.cached}`);
       });
     } catch (err) {
       console.error('[PLUGIN HUDL auto-refresh] Error during auto-refresh:', err);

@@ -347,6 +347,53 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						filteredByOutcome: gamesFilteredByOutcome,
 						reason: gamesEvaluated === 0 ? 'no-games-in-schedules' : 'no-time-match'
 					});
+					
+					// Fallback: Try refreshing teams for this camera and retry matching
+					const settings = await settingsManager.getSetting('hudl-org-url');
+					const hudlOrgUrl = settings || process.env.HUDL_ORG_URL || '';
+					
+					if (hudlOrgUrl && event.cameraId && event.startTime) {
+						console.log('[PLUGIN HUDL] Attempting fallback refresh for late-added games...');
+						const { refreshAndRetryMatch } = require('./lib-fallback-match.js');
+						
+						const fallbackMatch = await refreshAndRetryMatch({
+							cameraId: event.cameraId,
+							snifferId,
+							startTime: event.startTime,
+							storageManager,
+							hudlOrgUrl
+						});
+						
+						if (fallbackMatch) {
+							matchedGame = fallbackMatch.game;
+							matchedTeamId = fallbackMatch.teamId;
+							matchedChannelId = hudlMappings[fallbackMatch.teamId]?.channelId;
+							
+							console.log('[PLUGIN HUDL] ✓ Game matched via fallback:', {
+								opponent: fallbackMatch.game.opponentDetails?.name,
+								teamName: schedules[fallbackMatch.teamId]?.teamName
+							});
+							
+							// Generate thumbnail for this matchup
+							const opponentSchoolId = fallbackMatch.game.opponentDetails?.schoolId;
+							if (fallbackMatch.teamId && opponentSchoolId) {
+								const { generateSingleThumbnail } = require('./lib-thumbnail-generator.js');
+								const teamData = schedules[fallbackMatch.teamId];
+								const result = await generateSingleThumbnail({
+									homeTeamId: fallbackMatch.teamId,
+									homeLogo: teamData?.logoURL || null,
+									awayTeamId: opponentSchoolId,
+									awayLogo: fallbackMatch.game.opponentDetails?.profileImageUri || null
+								});
+								if (result.path) {
+									thumbnailPath = result.path;
+									if (result.generated) {
+										console.log('[PLUGIN HUDL] ✓ Generated new thumbnail for late-added game');
+									}
+								}
+							}
+						}
+					}
 				}
 			} else {
 				console.log('[PLUGIN HUDL] No startTime provided, skipping game matching');
@@ -567,39 +614,12 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 		});
 		await storageManager.storeData('recording-log', log);
 
-		// Clean up session tracking and reset permanent live title (with delay)
+		// Clean up session tracking (title reset happens during auto-refresh)
 		const session = global.__ACTIVE_RECORDING_SESSIONS__?.[snifferId]?.[event.cameraId];
 		if (session && session.permanentLiveVideoId) {
-			const snifferOAuthToken = snifferEntry?.oauthToken;
-			const videoId = session.permanentLiveVideoId;
-			const teamName = session.teamName;
-
-			// Remove session from tracking immediately
+			// Remove session from tracking
 			delete global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId];
 			console.log('[PLUGIN] Cleaned up recording session:', { snifferId, cameraId: event.cameraId });
-
-			// Delay title reset by 5 seconds to ensure PeerTube has created the replay
-			if (snifferOAuthToken) {
-				setTimeout(async () => {
-					try {
-						const { updateVideoMetadata } = require('./lib-peertube-api.js');
-						const genericTitle = `${teamName} - Wait Live`;
-						await updateVideoMetadata({
-							videoId,
-							updates: { name: genericTitle },
-							oauthToken: snifferOAuthToken,
-							peertubeHelpers,
-							settingsManager
-						});
-						console.log('[PLUGIN] Reset permanent live title after delay:', {
-							videoId,
-							newTitle: genericTitle
-						});
-					} catch (err) {
-						console.error('[PLUGIN] Failed to reset permanent live title:', err);
-					}
-				}, 30000); // 30 second delay
-			}
 		}
 
 		console.log('[PLUGIN] Recording stopped successfully:', {

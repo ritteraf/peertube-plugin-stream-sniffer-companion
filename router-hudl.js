@@ -698,5 +698,26 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		}
 	});
 
+	// Manual endpoint to sync replays to playlists
+	router.get('/manual-sync-replays-to-season-playlist', async (req, res) => {
+		try {
+			const { syncReplaysToPlaylists } = require('./lib-replay-sync.js');
+			const result = await syncReplaysToPlaylists({ storageManager, peertubeHelpers, settingsManager });
+			
+			return res.status(200).json({
+				success: true,
+				...result
+			});
+			
+		} catch (err) {
+			console.error('[PLUGIN] Error in manual replay sync:', err);
+			return res.status(500).json({
+				success: false,
+				message: 'Failed to sync replays',
+				error: err.message
+			});
+		}
+	});
+
 	return router;
 };
