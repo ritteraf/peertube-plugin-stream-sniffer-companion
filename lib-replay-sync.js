@@ -4,7 +4,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 	try {
 		console.log('[PLUGIN] Starting replay-to-playlist sync...');
 		
-		const cameras = (await storageManager.getData('cameras')) || {};
+		const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
 		const sniffers = (await storageManager.getData('sniffers')) || {};
 		const { addVideoToPlaylist } = require('./lib-peertube-api.js');
 		
@@ -12,8 +12,8 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 		let replaysAdded = 0;
 		const results = [];
 		
-		for (const teamId in cameras) {
-			const teamData = cameras[teamId];
+		for (const teamId in hudlMappings) {
+			const teamData = hudlMappings[teamId];
 			
 			// Skip if no permanent live or no seasons
 			if (!teamData.permanentLiveVideoId || !teamData.seasons) {
@@ -157,14 +157,14 @@ async function resetPermanentLiveTitles({ storageManager, peertubeHelpers, setti
 	try {
 		console.log('[PLUGIN] Starting permanent live title reset...');
 		
-		const cameras = (await storageManager.getData('cameras')) || {};
+		const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
 		const sniffers = (await storageManager.getData('sniffers')) || {};
 		const { updateVideoMetadata } = require('./lib-peertube-api.js');
 		
 		let titlesReset = 0;
 		
-		for (const teamId in cameras) {
-			const teamData = cameras[teamId];
+		for (const teamId in hudlMappings) {
+			const teamData = hudlMappings[teamId];
 			
 			// Skip if no permanent live
 			if (!teamData.permanentLiveVideoId || !teamData.teamName) {
