@@ -21,6 +21,21 @@ module.exports = function createStatusRouter({ storageManager, settingsManager, 
        // Helper function to sanitize sniffer status for public response
        function sanitizeSnifferStatus(snifferId, statusData) {
               const staleInfo = calculateStaleInfo(statusData.lastUpdate);
+              
+              // Process activeStreams to ensure enhanced health fields are included
+              const activeStreams = (statusData.activeStreams || []).map(stream => ({
+                     cameraId: stream.cameraId || 'unknown',
+                     status: stream.status || 'idle',
+                     streamUrl: stream.streamUrl || null,
+                     // Enhanced health tracking fields (v3.8.0)
+                     cameraHealth: stream.cameraHealth || 'healthy',
+                     currentIssues: stream.currentIssues || [],
+                     lastHealthyTime: stream.lastHealthyTime || null,
+                     isRelayActive: stream.isRelayActive !== undefined ? stream.isRelayActive : false,
+                     lastRelayFailure: stream.lastRelayFailure || null,
+                     consecutiveFailures: stream.consecutiveFailures || 0
+              }));
+
               return {
                      snifferId,
                      health: statusData.health || 'offline',
@@ -30,7 +45,7 @@ module.exports = function createStatusRouter({ storageManager, settingsManager, 
                      lastRestartTime: statusData.lastRestartTime || null,
                      lastRestartReason: statusData.lastRestartReason || null,
                      activeFailures: statusData.activeFailures || [],
-                     activeStreams: statusData.activeStreams || [],
+                     activeStreams,
                      systemMetrics: statusData.systemMetrics || { cpuUsage: 0, memoryUsage: 0, diskSpace: 0 },
                      lastActivity: statusData.lastActivity || null,
                      lastUpdateTimestamp: statusData.lastUpdate || null,
