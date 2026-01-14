@@ -161,10 +161,61 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				
 				const { data: videos } = await res.json();
 				
-				// Get videos already in playlist
+				// Verify playlist exists before trying to add videos
 				const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=500`, {
 					headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
 				});
+				
+				// If playlist doesn't exist (404), clear the reference and auto-recreate
+				if (playlistRes.status === 404) {
+					console.log(`[PLUGIN] Playlist ${seasonData.playlistId} no longer exists for ${teamData.teamName}, recreating...`);
+					
+					// Clear the stale reference
+					delete seasonData.playlistId;
+					delete seasonData.playlistName;
+					
+					// Auto-create new playlist
+					try {
+						const { createPlaylist } = require('./lib-peertube-api.js');
+						const { generatePlaylistTitle } = require('./lib-game-title.js');
+						
+						const orgData = (await storageManager.getData('hudl-organization')) || {};
+						const schoolName = orgData.name || 'School';
+						const scheduleData = hudlSchedules[teamId];
+						
+						const playlistDisplayName = generatePlaylistTitle(
+							{ gender: scheduleData?.gender, teamLevel: scheduleData?.level, sport: scheduleData?.sport },
+							schoolName,
+							seasonYear
+						) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;
+						
+						const nextYear = parseInt(seasonYear) + 1;
+						const newPlaylist = await createPlaylist({
+							channelId: teamData.channelId,
+							displayName: playlistDisplayName,
+							description: `${schoolName} ${scheduleData?.sport || 'team'} season ${seasonYear}-${nextYear}`,
+							privacy: teamData.privacy !== undefined ? teamData.privacy : 1,
+							oauthToken: snifferOAuthToken,
+							peertubeHelpers,
+							settingsManager
+						});
+						
+						seasonData.playlistId = newPlaylist.playlistId;
+						seasonData.playlistName = newPlaylist.displayName;
+						hudlMappings[teamId] = teamData;
+						await storageManager.storeData('hudl-mappings', hudlMappings);
+						
+						console.log(`[PLUGIN] Recreated playlist: ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
+					} catch (recreateErr) {
+						results.push({
+							team: teamData.teamName,
+							status: 'error',
+							reason: `Playlist deleted and failed to recreate: ${recreateErr.message}`
+						});
+						console.error(`[PLUGIN] Failed to recreate playlist for ${teamData.teamName}:`, recreateErr);
+						continue;
+					}
+				}
 				
 				const playlistVideos = playlistRes.ok ? (await playlistRes.json()).data : [];
 				const playlistVideoIds = new Set(playlistVideos.map(v => v.video.id));
