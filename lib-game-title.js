@@ -4,21 +4,20 @@
 function generateGameTitle(game, teamData, schoolName) {
   if (!game || !teamData) return null;
 
-  // Strip "High School", "Junior High", "HS", "JH" suffixes
+  // Strip school suffixes for cleaner titles (aesthetic only - not used for matching)
   const stripSchoolSuffix = (name) => {
     if (!name) return name;
     return name
       .replace(/\s+High School$/i, '')
       .replace(/\s+Junior High$/i, '')
+      .replace(/\s+Middle School$/i, '')
       .replace(/\s+HS$/i, '')
       .replace(/\s+JH$/i, '')
+      .replace(/\s+MS$/i, '')
       .trim();
   };
 
-  // Use school name (e.g., "Elkhorn Valley High School" → "Elkhorn Valley")
   const homeTeam = stripSchoolSuffix(schoolName) || 'Home Team';
-
-  // Opponent name (e.g., "Ainsworth High School" → "Ainsworth")
   const opponent = stripSchoolSuffix(game.opponentDetails?.name) || 'Opponent';
 
   // Home vs Away
@@ -35,8 +34,10 @@ function generateGameTitle(game, teamData, schoolName) {
   // Format sport: BASKETBALL → Basketball
   const sport = teamData.sport ? teamData.sport.charAt(0) + teamData.sport.slice(1).toLowerCase() : '';
 
-  // Build title: "Elkhorn Valley vs Ainsworth Mens Varsity Basketball"
+  // Build metadata from HUDL fields only: "Mens Varsity Basketball"
   const metadata = [gender, level, sport].filter(p => p).join(' ');
+  
+  // Build title: "Elkhorn Valley vs Pierce Mens Varsity Basketball"
   const titleParts = [homeTeam, vsOrAt, opponent, metadata].filter(p => p);
 
   return titleParts.join(' ');
@@ -46,18 +47,19 @@ function generateGameTitle(game, teamData, schoolName) {
 function generatePlaylistTitle(teamData, schoolName, seasonYear) {
   if (!teamData || !seasonYear) return null;
 
-  // Strip "High School", "Junior High", "HS", "JH" suffixes
+  // Strip school suffixes for cleaner titles (aesthetic only - not used for matching)
   const stripSchoolSuffix = (name) => {
     if (!name) return name;
     return name
       .replace(/\s+High School$/i, '')
       .replace(/\s+Junior High$/i, '')
+      .replace(/\s+Middle School$/i, '')
       .replace(/\s+HS$/i, '')
       .replace(/\s+JH$/i, '')
+      .replace(/\s+MS$/i, '')
       .trim();
   };
 
-  // Use school name (e.g., "Elkhorn Valley High School" → "Elkhorn Valley")
   const school = stripSchoolSuffix(schoolName) || 'School';
 
   // Format gender: MENS → Mens, WOMENS → Womens, COED → Coed
@@ -71,7 +73,7 @@ function generatePlaylistTitle(teamData, schoolName, seasonYear) {
   // Format sport: BASKETBALL → Basketball
   const sport = teamData.sport ? teamData.sport.charAt(0) + teamData.sport.slice(1).toLowerCase() : '';
 
-  // Build metadata: "Mens JV Basketball"
+  // Build metadata from HUDL fields only: "Mens JV Basketball"
   const metadata = [gender, level, sport].filter(p => p).join(' ');
 
   // Season years: "2025-2026"

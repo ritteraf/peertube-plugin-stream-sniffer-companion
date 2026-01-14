@@ -163,29 +163,40 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 
 				// Filter videos by team name tag (primary) or title metadata (fallback)
 				const scheduleData = hudlSchedules[teamId];
+				
+				// STRICT: Require all three HUDL metadata fields
+				if (!scheduleData?.gender || !scheduleData?.level || !scheduleData?.sport) {
+					results.push({
+						team: teamData.teamName,
+						status: 'error',
+						reason: `Missing HUDL metadata (gender: ${scheduleData?.gender}, level: ${scheduleData?.level}, sport: ${scheduleData?.sport})`
+					});
+					console.error(`[PLUGIN] Missing HUDL metadata for team ${teamData.teamName}, skipping playlist sync`);
+					continue;
+				}
 			
 			// Build gender variants (we use "Mens"/"Womens" but tags use "Boys"/"Girls")
 			const genderVariants = [];
-			if (scheduleData?.gender === 'MENS') {
+			if (scheduleData.gender === 'MENS') {
 				genderVariants.push('Mens', 'Boys', 'Men');
-			} else if (scheduleData?.gender === 'WOMENS') {
+			} else if (scheduleData.gender === 'WOMENS') {
 				genderVariants.push('Womens', 'Girls', 'Women');
-			} else if (scheduleData?.gender === 'COED') {
+			} else if (scheduleData.gender === 'COED') {
 				genderVariants.push('Coed');
 			}
 			
 			// Build level variants
 			const levelVariants = [];
-			if (scheduleData?.level === 'VARSITY') {
+			if (scheduleData.level === 'VARSITY') {
 				levelVariants.push('Varsity', 'Var');
-			} else if (scheduleData?.level === 'JUNIOR_VARSITY') {
+			} else if (scheduleData.level === 'JUNIOR_VARSITY') {
 				levelVariants.push('JV', 'Junior Varsity', 'J.V.');
-			} else if (scheduleData?.level === 'FRESHMAN') {
+			} else if (scheduleData.level === 'FRESHMAN') {
 				levelVariants.push('Freshman', 'Fresh', 'Frosh');
 			}
 			
 			// Sport name (handle multi-word sports)
-			const sport = scheduleData?.sport ? scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase().replace(/_/g, ' ') : '';
+			const sport = scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase().replace(/_/g, ' ');
 			
 			const teamVideos = videos.filter(v => {
 				// Primary: Check if video has team name tag
@@ -193,38 +204,32 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 					return true;
 				}
 				
-				// Fallback: Check if video title contains team metadata
+				// Fallback: Check if video title OR tags contain HUDL metadata (gender + level + sport)
 				if (!v.name) return false;
 				
-				// Must match gender (at least one variant)
-				const hasGender = genderVariants.length === 0 || genderVariants.some(g => v.name.includes(g));
+				const videoText = v.name + ' ' + (v.tags ? v.tags.join(' ') : '');
+				
+				// Helper: Match with word boundaries to avoid false positives (e.g., "Varsity" shouldn't match "Junior Varsity")
+				const matchesVariant = (text, variants) => {
+					return variants.some(variant => {
+						// Escape special regex characters and use word boundaries
+						const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+						const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+						return regex.test(text);
+					});
+				};
+				
+				// STRICT: Must match gender (at least one variant with word boundaries)
+				const hasGender = matchesVariant(videoText, genderVariants);
 				if (!hasGender) return false;
 				
-				// Must match sport
-				const hasSport = !sport || v.name.includes(sport);
+				// STRICT: Must match level (at least one variant with word boundaries)
+				const hasLevel = matchesVariant(videoText, levelVariants);
+				if (!hasLevel) return false;
+				
+				// STRICT: Must match sport (with word boundaries)
+				const hasSport = matchesVariant(videoText, [sport]);
 				if (!hasSport) return false;
-				
-				// Level matching with HS/JH distinction
-				const teamNameUpper = teamData.teamName.toUpperCase();
-				
-				if (teamNameUpper.startsWith('HS ') || teamNameUpper.includes(' HS ')) {
-					// HS team - must have a level marker if team has one
-					if (levelVariants.length > 0) {
-						return levelVariants.some(l => v.name.includes(l));
-					}
-					return true;
-				} else if (teamNameUpper.startsWith('JH ') || teamNameUpper.includes(' JH ') || 
-				           teamNameUpper.startsWith('MS ') || teamNameUpper.includes(' MS ')) {
-					// JH/MS team - exclude videos with HS-specific level markers
-					const hsLevelMarkers = ['JV', 'J.V.', 'Junior Varsity', 'Varsity', 'Var'];
-					const hasHSLevel = hsLevelMarkers.some(marker => v.name.includes(marker));
-					return !hasHSLevel;
-				}
-				
-				// For teams without HS/JH designation, match level if specified
-				if (levelVariants.length > 0) {
-					return levelVariants.some(l => v.name.includes(l));
-				}
 				
 				return true;
 			});
