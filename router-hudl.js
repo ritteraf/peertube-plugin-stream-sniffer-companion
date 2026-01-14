@@ -734,18 +734,18 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		try {
 			// Verify the new owner exists in sniffers
 			const sniffers = (await storageManager.getData('sniffers')) || {};
-			const ownerExists = Object.values(sniffers).some(
+			const ownerSnifferEntry = Object.values(sniffers).find(
 				sniffer => sniffer.peertubeUsername === ownerUsername
 			);
 			
-			if (!ownerExists) {
+			if (!ownerSnifferEntry) {
 				return res.status(400).json({
 					success: false,
 					message: `No active sniffer found with username ${ownerUsername}`
 				});
 			}
 			
-			// Update team ownership
+			// Get team mapping
 			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
 			
 			if (!hudlMappings[teamId]) {
@@ -755,18 +755,59 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				});
 			}
 			
-			const oldOwner = hudlMappings[teamId].ownerUsername;
-			hudlMappings[teamId].ownerUsername = ownerUsername;
+			const teamMapping = hudlMappings[teamId];
+			const channelId = teamMapping.channelId;
+			
+			// Validate channel ownership - fetch channel details from PeerTube
+			if (channelId) {
+				try {
+					const fetch = require('node-fetch');
+					const baseUrl = await peertubeHelpers.config.getWebserverUrl();
+					
+					// Use owner's OAuth token to fetch channel details
+					const channelRes = await fetch(`${baseUrl}/api/v1/video-channels/${channelId}`, {
+						headers: { 'Authorization': `Bearer ${ownerSnifferEntry.oauthToken}` }
+					});
+					
+					if (channelRes.ok) {
+						const channelData = await channelRes.json();
+						const channelOwnerUsername = channelData.ownerAccount?.name || null;
+						
+						if (channelOwnerUsername && channelOwnerUsername !== ownerUsername) {
+							// Channel ownership mismatch - reject the transfer
+							return res.status(400).json({
+								success: false,
+								error: 'CHANNEL_OWNERSHIP_MISMATCH',
+								message: `Cannot transfer team ownership: Channel #${channelId} is owned by ${channelOwnerUsername}, not ${ownerUsername}`,
+								teamId,
+								channelId,
+								channelOwner: channelOwnerUsername,
+								attemptedOwner: ownerUsername
+							});
+						}
+					} else {
+						console.warn(`[PLUGIN] Failed to fetch channel ${channelId} details: ${channelRes.status}`);
+						// Continue with transfer if we can't verify (might be permissions issue)
+					}
+				} catch (channelCheckErr) {
+					console.error(`[PLUGIN] Error checking channel ownership:`, channelCheckErr);
+					// Continue with transfer if validation fails (don't block on network errors)
+				}
+			}
+			
+			const oldOwner = teamMapping.ownerUsername;
+			teamMapping.ownerUsername = ownerUsername;
 			
 			// Update playlist ownership for all seasons
-			if (hudlMappings[teamId].seasons) {
-				for (const seasonYear in hudlMappings[teamId].seasons) {
-					if (hudlMappings[teamId].seasons[seasonYear].createdByUser) {
-						hudlMappings[teamId].seasons[seasonYear].createdByUser = ownerUsername;
+			if (teamMapping.seasons) {
+				for (const seasonYear in teamMapping.seasons) {
+					if (teamMapping.seasons[seasonYear].createdByUser) {
+						teamMapping.seasons[seasonYear].createdByUser = ownerUsername;
 					}
 				}
 			}
 			
+			hudlMappings[teamId] = teamMapping;
 			await storageManager.storeData('hudl-mappings', hudlMappings);
 			
 			console.log(`[PLUGIN] Team ${teamId} ownership changed from ${oldOwner || 'unknown'} to ${ownerUsername}`);
@@ -774,10 +815,10 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 			return res.status(200).json({
 				success: true,
 				teamId,
-				teamName: hudlMappings[teamId].teamName,
+				teamName: teamMapping.teamName,
 				oldOwner: oldOwner || null,
 				newOwner: ownerUsername,
-				playlistsUpdated: hudlMappings[teamId].seasons ? Object.keys(hudlMappings[teamId].seasons).length : 0
+				playlistsUpdated: teamMapping.seasons ? Object.keys(teamMapping.seasons).length : 0
 			});
 			
 		} catch (err) {
