@@ -892,3 +892,5 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		}
 	});
 
+	return router;
+};
