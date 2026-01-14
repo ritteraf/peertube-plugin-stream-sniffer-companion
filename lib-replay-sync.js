@@ -27,54 +27,102 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			// This handles multi-year seasons like Basketball 2025-2026
 			const schedule = hudlSchedules[teamId];
 			const seasonYear = schedule?.seasonYear || new Date().getFullYear();
-			const seasonData = teamData.seasons[seasonYear];
-			
-			if (!seasonData || !seasonData.playlistId) {
+		
+		// Find OAuth token for the team owner's username (needed for both playlist creation and sync)
+		let snifferOAuthToken = null;
+		const ownerUsername = teamData.ownerUsername;
+		
+		if (!ownerUsername) {
+			results.push({
+				team: teamData.teamName,
+				status: 'error',
+				reason: 'No owner username stored for this team'
+			});
+			console.log(`[PLUGIN] No owner username for team ${teamData.teamName}`);
+			continue;
+		}
+		
+		// Find any sniffer authenticated as this user
+		for (const snifferId in sniffers) {
+			if (sniffers[snifferId]?.peertubeUsername === ownerUsername) {
+				snifferOAuthToken = sniffers[snifferId]?.oauthToken;
+				break;
+			}
+		}
+		
+		if (!snifferOAuthToken) {
+			results.push({
+				team: teamData.teamName,
+				status: 'error',
+				reason: `No active sniffer found with user ${ownerUsername}`
+			});
+			console.log(`[PLUGIN] No OAuth token found for user ${ownerUsername} (team ${teamData.teamName})`);
+			continue;
+		}
+		
+		// Auto-create playlist for this season if it doesn't exist yet
+		let seasonData = teamData.seasons?.[seasonYear];
+		if (!seasonData || !seasonData.playlistId) {
+			if (!seasonYear || !teamData.channelId) {
 				results.push({
 					team: teamData.teamName,
 					status: 'skipped',
-					reason: `No playlist for season ${seasonYear}`
+					reason: `No playlist for season ${seasonYear} and cannot auto-create (missing seasonYear or channelId)`
 				});
 				continue;
 			}
-			
-			// Find OAuth token for the team owner's username
-			let snifferOAuthToken = null;
-			const ownerUsername = teamData.ownerUsername;
-			
-			if (!ownerUsername) {
-				results.push({
-					team: teamData.teamName,
-					status: 'error',
-					reason: 'No owner username stored for this team'
-				});
-				console.log(`[PLUGIN] No owner username for team ${teamData.teamName}`);
-				continue;
-			}
-			
-			// Find any sniffer authenticated as this user
-			for (const snifferId in sniffers) {
-				if (sniffers[snifferId]?.peertubeUsername === ownerUsername) {
-					snifferOAuthToken = sniffers[snifferId]?.oauthToken;
-					break;
-				}
-			}
-			
-			if (!snifferOAuthToken) {
-				results.push({
-					team: teamData.teamName,
-					status: 'error',
-					reason: `No active sniffer found with user ${ownerUsername}`
-				});
-				console.log(`[PLUGIN] No OAuth token found for user ${ownerUsername} (team ${teamData.teamName})`);
-				continue;
-			}
-			
-			// Fetch videos from channel
-			const baseUrl = await peertubeHelpers.config.getWebserverUrl();
-			const channelId = teamData.channelId;
 			
 			try {
+				console.log(`[PLUGIN] Auto-creating playlist for ${teamData.teamName} season ${seasonYear}`);
+				const { createPlaylist } = require('./lib-peertube-api.js');
+				const nextYear = parseInt(seasonYear) + 1;
+				const playlistDisplayName = `${teamData.teamName} ${seasonYear}-${nextYear}`;
+				
+				const newPlaylist = await createPlaylist({
+					channelId: teamData.channelId,
+					displayName: playlistDisplayName,
+					description: `${teamData.teamName} season ${seasonYear}-${nextYear}`,
+					privacy: teamData.privacy !== undefined ? teamData.privacy : 1,
+					oauthToken: snifferOAuthToken,
+					peertubeHelpers,
+					settingsManager
+				});
+				
+				// Initialize seasons object if needed
+				if (!teamData.seasons) {
+					teamData.seasons = {};
+				}
+				
+				teamData.seasons[seasonYear] = {
+					seasonYear: seasonYear,
+					playlistId: newPlaylist.playlistId,
+					playlistName: newPlaylist.displayName,
+					createdByUser: ownerUsername
+				};
+				
+				// Update storage
+				hudlMappings[teamId] = teamData;
+				await storageManager.storeData('hudl-mappings', hudlMappings);
+				
+				seasonData = teamData.seasons[seasonYear];
+				console.log(`[PLUGIN] Created playlist ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
+				
+			} catch (playlistErr) {
+				results.push({
+					team: teamData.teamName,
+					status: 'error',
+					reason: `Failed to auto-create playlist: ${playlistErr.message}`
+				});
+				console.error(`[PLUGIN] Failed to create playlist for ${teamData.teamName}:`, playlistErr);
+				continue;
+			}
+		}
+		
+		// Fetch videos from channel
+		const baseUrl = await peertubeHelpers.config.getWebserverUrl();
+		const channelId = teamData.channelId;
+		
+		try {
 				const res = await fetch(`${baseUrl}/api/v1/video-channels/${channelId}/videos?count=50&sort=-publishedAt`, {
 					headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
 				});
