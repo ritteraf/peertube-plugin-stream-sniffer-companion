@@ -165,15 +165,15 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				const scheduleData = hudlSchedules[teamId];
 				
 				// STRICT: Require all three HUDL metadata fields
-				if (!scheduleData?.gender || !scheduleData?.level || !scheduleData?.sport) {
-					results.push({
-						team: teamData.teamName,
-						status: 'error',
-						reason: `Missing HUDL metadata (gender: ${scheduleData?.gender}, level: ${scheduleData?.level}, sport: ${scheduleData?.sport})`
-					});
-					console.error(`[PLUGIN] Missing HUDL metadata for team ${teamData.teamName}, skipping playlist sync`);
-					continue;
-				}
+			if (!scheduleData?.gender || !scheduleData?.teamLevel || !scheduleData?.sport) {
+				results.push({
+					team: teamData.teamName,
+					status: 'error',
+					reason: `Missing HUDL metadata (gender: ${scheduleData?.gender}, level: ${scheduleData?.teamLevel}, sport: ${scheduleData?.sport})`
+				});
+				console.error(`[PLUGIN] Missing HUDL metadata for team ${teamData.teamName}, skipping playlist sync`);
+				continue;
+			}
 			
 			// Build gender variants (we use "Mens"/"Womens" but tags use "Boys"/"Girls")
 			const genderVariants = [];
@@ -187,15 +187,11 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			
 			// Build level variants
 			const levelVariants = [];
-			if (scheduleData.level === 'VARSITY') {
+			if (scheduleData.teamLevel === 'VARSITY') {
 				levelVariants.push('Varsity', 'Var');
-			} else if (scheduleData.level === 'JUNIOR_VARSITY') {
+			} else if (scheduleData.teamLevel === 'JUNIOR_VARSITY') {
 				levelVariants.push('JV', 'Junior Varsity', 'J.V.');
-			} else if (scheduleData.level === 'FRESHMAN') {
-				levelVariants.push('Freshman', 'Fresh', 'Frosh');
-			}
-			
-			// Sport name (handle multi-word sports)
+			} else if (scheduleData.teamLevel === 'FRESHMAN') {
 			const sport = scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase().replace(/_/g, ' ');
 			
 			const teamVideos = videos.filter(v => {
