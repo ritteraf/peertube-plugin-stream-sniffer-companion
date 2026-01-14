@@ -161,10 +161,36 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				
 				const { data: videos } = await res.json();
 				
-				// Verify playlist exists before trying to add videos
-				const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=500`, {
-					headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
-				});
+// Filter videos by team name tag (primary) or title metadata (fallback)
+		const scheduleData = hudlSchedules[teamId];
+		const genderMap = { MENS: 'Mens', WOMENS: 'Womens', COED: 'Coed' };
+		const levelMap = { VARSITY: 'Varsity', JUNIOR_VARSITY: 'JV', FRESHMAN: 'Freshman', OTHER: '' };
+		const gender = genderMap[scheduleData?.gender] || '';
+		const level = levelMap[scheduleData?.level] || '';
+		const sport = scheduleData?.sport ? scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase() : '';
+		
+		// Build metadata pattern for title matching (e.g., "Mens Varsity Basketball")
+		const metadataPattern = [gender, level, sport].filter(p => p).join(' ');
+		
+		const teamVideos = videos.filter(v => {
+			// Primary: Check if video has team name tag
+			if (v.tags && v.tags.includes(teamData.teamName)) {
+				return true;
+			}
+			// Fallback: Check if video title contains team metadata
+			if (metadataPattern && v.name && v.name.includes(metadataPattern)) {
+				return true;
+			}
+			return false;
+		});
+		
+		console.log(`[PLUGIN] Filtered ${videos.length} videos to ${teamVideos.length} for team ${teamData.teamName} (tag: "${teamData.teamName}", pattern: "${metadataPattern}")`);
+		
+		// Verify playlist exists before trying to add videos
+		const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=500`, {
+			headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
+		});
+			
 				
 				// If playlist doesn't exist (404), clear the reference and auto-recreate
 				if (playlistRes.status === 404) {
@@ -224,7 +250,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				// Replays: not live, not the permanent live video itself, created this season
 				// Use July 1st of season year as cutoff (e.g., July 1 2025 for 2025-2026 season)
 				const seasonStart = new Date(seasonYear, 6, 1); // Month 6 = July (0-indexed)
-				const replays = videos.filter(v => 
+				const replays = teamVideos.filter(v => 
 					!v.isLive && 
 					v.id !== teamData.permanentLiveVideoId &&
 					new Date(v.createdAt) >= seasonStart &&

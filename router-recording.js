@@ -428,11 +428,12 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				const schedule = schedules[matchedTeamId];
 				const teamTags = parseTeamTags(schedule?.gender, schedule?.level, schedule?.sport);
 
-				// Add opponent name to tags if available
-				const opponentName = matchedGame.opponentDetails?.name;
-				if (opponentName) {
-					teamTags.push(opponentName);
-				}
+			// Add team name tag (REQUIRED for playlist sync filtering when teams share channels)
+			const teamNameTag = teamMapping.teamName;
+			if (teamNameTag && teamNameTag.length >= 2 && teamNameTag.length <= 30) {
+				teamTags.unshift(teamNameTag); // Add at beginning to ensure it's included
+			}
+
 
 				// Add custom tags if available
 				if (Array.isArray(teamMapping.customTags)) {
