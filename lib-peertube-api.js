@@ -441,13 +441,22 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 					const seasonData = teamSettings.seasons[teamSettings.seasonYear];
 					if (!seasonData || !seasonData.playlistId) {
 						// Create new playlist for this season
+						const { generatePlaylistTitle } = require('./lib-game-title.js');
+						const orgData = (await storageManager.getData('hudl-organization')) || {};
+						const schoolName = orgData.name || 'School';
+						
+						const playlistDisplayName = generatePlaylistTitle(
+							{ gender: teamSettings.gender, teamLevel: teamSettings.teamLevel, sport: teamSettings.sport },
+							schoolName,
+							teamSettings.seasonYear
+						) || `${teamSettings.teamName} ${teamSettings.seasonYear}-${parseInt(teamSettings.seasonYear) + 1}`;
+						
 						const nextYear = parseInt(teamSettings.seasonYear) + 1;
-						const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
 						console.log(`[PLUGIN] Creating new playlist: ${playlistDisplayName}`);
 						const newPlaylist = await createPlaylist({
 							channelId: teamSettings.channelId,
 							displayName: playlistDisplayName,
-							description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
+							description: `${schoolName} season ${teamSettings.seasonYear}-${nextYear}`,
 							privacy: teamSettings.privacy,
 							oauthToken: peertubeOAuthToken,
 							peertubeHelpers,
@@ -535,13 +544,22 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 			const seasonData = teamSettings.seasons[teamSettings.seasonYear];
 			if (!seasonData || !seasonData.playlistId) {
 				// Create new playlist for this season
-				const nextYear = parseInt(teamSettings.seasonYear) + 1;
-				const playlistDisplayName = `${teamSettings.teamName} ${teamSettings.seasonYear}-${nextYear}`;
-				console.log(`[PLUGIN] Creating new playlist: ${playlistDisplayName}`);
-				const newPlaylist = await createPlaylist({
-					channelId: teamSettings.channelId,
-					displayName: playlistDisplayName,
-					description: `${teamSettings.teamName} season ${teamSettings.seasonYear}-${nextYear}`,
+			const { generatePlaylistTitle } = require('./lib-game-title.js');
+			const orgData = (await storageManager.getData('hudl-organization')) || {};
+			const schoolName = orgData.name || 'School';
+			
+			const playlistDisplayName = generatePlaylistTitle(
+				{ gender: teamSettings.gender, teamLevel: teamSettings.teamLevel, sport: teamSettings.sport },
+				schoolName,
+				teamSettings.seasonYear
+			) || `${teamSettings.teamName} ${teamSettings.seasonYear}-${parseInt(teamSettings.seasonYear) + 1}`;
+			
+			const nextYear = parseInt(teamSettings.seasonYear) + 1;
+			console.log(`[PLUGIN] Creating new playlist: ${playlistDisplayName}`);
+			const newPlaylist = await createPlaylist({
+				channelId: teamSettings.channelId,
+				displayName: playlistDisplayName,
+				description: `${schoolName} season ${teamSettings.seasonYear}-${nextYear}`,
 					privacy: teamSettings.privacy,
 					oauthToken: peertubeOAuthToken,
 					peertubeHelpers,

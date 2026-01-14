@@ -150,14 +150,18 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			const deletedCameras = cameras[snifferId] ? Object.keys(cameras[snifferId]).length : 0;
 			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
 
-			// Get sniffer's OAuth token for PeerTube API calls
+			// Get sniffer's OAuth token and username for clearing configuration
 			if (!storageManager) throw new Error('storageManager not initialized');
 			let sniffers = (await storageManager.getData('sniffers')) || {};
 			const snifferEntry = sniffers[snifferId];
 			const oauthToken = snifferEntry && snifferEntry.oauthToken;
+			const username = snifferEntry && snifferEntry.peertubeUsername;
 
-			// Delete videos from PeerTube
+			// Track deletion counts
 			const permanentLivesDeleted = [];
+			let hudlMappingsCleared = 0;
+
+			// Delete permanent live videos (streaming placeholders, not actual content)
 			if (oauthToken && videoIdsToDelete.length > 0) {
 				const { deleteVideo } = require('./lib-peertube-api.js');
 				for (const videoId of videoIdsToDelete) {
@@ -171,11 +175,28 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 				}
 			}
 
+			// Clear team ownership and configuration for this user (but don't delete playlists/content)
+			let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+			for (const [teamId, teamData] of Object.entries(hudlMappings)) {
+				if (teamData.ownerUsername === username) {
+					delete teamData.ownerUsername;
+					delete teamData.channelId;
+					delete teamData.channelHandle;
+					delete teamData.permanentLiveVideoId;
+					delete teamData.playlistId;
+					hudlMappingsCleared++;
+				}
+			}
+			await storageManager.storeData('hudl-mappings', hudlMappings);
+
+			// Clear camera assignments
 			delete cameras[snifferId];
 			await setCameraAssignments(cameras);
-			// Remove sniffer credentials as well
+			
+			// Remove sniffer credentials
 			delete sniffers[snifferId];
 			await storageManager.storeData('sniffers', sniffers);
+			
 			return res.status(200).json({
 				resetComplete: true,
 				deleted: {
@@ -183,11 +204,13 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					oauthTokens: true,
 					encryptedCredentials: true,
 					registryEntry: true,
-					permanentLiveVideos: permanentLivesDeleted.length
+					permanentLiveVideos: permanentLivesDeleted.length,
+					hudlTeamMappings: hudlMappingsCleared
 				},
 				permanentLivesDeleted,
+				note: 'Playlists and replay videos were preserved',
 				reauthenticationRequired: true,
-				message: 'All data reset'
+				message: 'All configuration reset'
 			});
 		} catch (err) {
 			return res.status(500).json({ error: 'PLUGIN_RESET_FAILED', message: err.message });

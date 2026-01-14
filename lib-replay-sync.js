@@ -75,13 +75,25 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			try {
 				console.log(`[PLUGIN] Auto-creating playlist for ${teamData.teamName} season ${seasonYear}`);
 				const { createPlaylist } = require('./lib-peertube-api.js');
-				const nextYear = parseInt(seasonYear) + 1;
-				const playlistDisplayName = `${teamData.teamName} ${seasonYear}-${nextYear}`;
+				const { generatePlaylistTitle } = require('./lib-game-title.js');
 				
+				// Get school name for consistent naming
+				const orgData = (await storageManager.getData('hudl-organization')) || {};
+				const schoolName = orgData.name || 'School';
+				
+				// Generate consistent playlist title using team metadata
+				const scheduleData = hudlSchedules[teamId];
+				const playlistDisplayName = generatePlaylistTitle(
+					{ gender: scheduleData?.gender, teamLevel: scheduleData?.level, sport: scheduleData?.sport },
+					schoolName,
+					seasonYear
+				) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;
+				
+				const nextYear = parseInt(seasonYear) + 1;
 				const newPlaylist = await createPlaylist({
 					channelId: teamData.channelId,
 					displayName: playlistDisplayName,
-					description: `${teamData.teamName} season ${seasonYear}-${nextYear}`,
+					description: `${schoolName} ${scheduleData?.sport || 'team'} season ${seasonYear}-${nextYear}`,
 					privacy: teamData.privacy !== undefined ? teamData.privacy : 1,
 					oauthToken: snifferOAuthToken,
 					peertubeHelpers,
