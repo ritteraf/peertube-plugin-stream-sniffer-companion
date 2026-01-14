@@ -852,5 +852,43 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		}
 	});
 
-	return router;
-};
+	// POST /clear-playlist-references - Clear all playlist references from hudl-mappings
+	router.post('/clear-playlist-references', requireAuth, async (req, res) => {
+		try {
+			let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+			let clearedCount = 0;
+			
+			for (const teamId in hudlMappings) {
+				const teamData = hudlMappings[teamId];
+				if (teamData.seasons) {
+					for (const seasonYear in teamData.seasons) {
+						if (teamData.seasons[seasonYear].playlistId) {
+							delete teamData.seasons[seasonYear].playlistId;
+							delete teamData.seasons[seasonYear].playlistName;
+							clearedCount++;
+						}
+					}
+				}
+				// Also clear legacy playlistId field if present
+				if (teamData.playlistId) {
+					delete teamData.playlistId;
+					clearedCount++;
+				}
+			}
+			
+			await storageManager.storeData('hudl-mappings', hudlMappings);
+			
+			return res.status(200).json({
+				success: true,
+				clearedCount,
+				message: `Cleared ${clearedCount} playlist reference(s) from storage`
+			});
+		} catch (err) {
+			peertubeHelpers.logger.error('[POST /clear-playlist-references] Error:', err);
+			return res.status(500).json({
+				success: false,
+				error: err.message
+			});
+		}
+	});
+
