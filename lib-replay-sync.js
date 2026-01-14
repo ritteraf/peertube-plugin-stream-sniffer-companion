@@ -120,10 +120,20 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 		
 		// Fetch videos from channel
 		const baseUrl = await peertubeHelpers.config.getWebserverUrl();
-		const channelId = teamData.channelId;
+		const channelHandle = teamData.channelHandle;
+		
+		if (!channelHandle) {
+			results.push({
+				team: teamData.teamName,
+				status: 'error',
+				reason: 'No channel handle stored for this team'
+			});
+			console.log(`[PLUGIN] No channel handle for team ${teamData.teamName}`);
+			continue;
+		}
 		
 		try {
-				const res = await fetch(`${baseUrl}/api/v1/video-channels/${channelId}/videos?count=50&sort=-publishedAt`, {
+				const res = await fetch(`${baseUrl}/api/v1/video-channels/${encodeURIComponent(channelHandle)}/videos?count=50&sort=-publishedAt`, {
 					headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
 				});
 				
