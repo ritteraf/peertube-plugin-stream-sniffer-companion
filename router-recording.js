@@ -448,6 +448,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					teamId: matchedTeamId,
 					teamName: teamMapping.teamName,
 					channelId: teamMapping.channelId,
+					ownerUsername: teamMapping.ownerUsername,
 					streamTitle: generatedTitle,
 					streamDescription: teamMapping.description || `${teamMapping.teamName} game`,
 					category: teamMapping.category !== undefined ? teamMapping.category : cameraAssignment.defaultStreamCategory,

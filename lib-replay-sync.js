@@ -5,6 +5,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 		console.log('[PLUGIN] Starting replay-to-playlist sync...');
 		
 		const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+		const hudlSchedules = (await storageManager.getData('hudl-schedules')) || {};
 		const sniffers = (await storageManager.getData('sniffers')) || {};
 		const { addVideoToPlaylist } = require('./lib-peertube-api.js');
 		
@@ -22,9 +23,10 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			
 			teamsChecked++;
 			
-			// Get current season's playlist using the team's season year (not calendar year)
+			// Get current season's playlist using the team's season year from schedules (not calendar year)
 			// This handles multi-year seasons like Basketball 2025-2026
-			const seasonYear = teamData.currentSeasonYear || new Date().getFullYear();
+			const schedule = hudlSchedules[teamId];
+			const seasonYear = schedule?.seasonYear || new Date().getFullYear();
 			const seasonData = teamData.seasons[seasonYear];
 			
 			if (!seasonData || !seasonData.playlistId) {
@@ -36,28 +38,35 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				continue;
 			}
 			
-			// Find OAuth token for this team
+			// Find OAuth token for the team owner's username
 			let snifferOAuthToken = null;
-			const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
+			const ownerUsername = teamData.ownerUsername;
 			
-			for (const snifferId in cameraAssignments) {
-				const assignments = cameraAssignments[snifferId];
-				for (const cameraId in assignments) {
-					if (assignments[cameraId].teamId === teamId) {
-						snifferOAuthToken = sniffers[snifferId]?.oauthToken;
-						break;
-					}
+			if (!ownerUsername) {
+				results.push({
+					team: teamData.teamName,
+					status: 'error',
+					reason: 'No owner username stored for this team'
+				});
+				console.log(`[PLUGIN] No owner username for team ${teamData.teamName}`);
+				continue;
+			}
+			
+			// Find any sniffer authenticated as this user
+			for (const snifferId in sniffers) {
+				if (sniffers[snifferId]?.peertubeUsername === ownerUsername) {
+					snifferOAuthToken = sniffers[snifferId]?.oauthToken;
+					break;
 				}
-				if (snifferOAuthToken) break;
 			}
 			
 			if (!snifferOAuthToken) {
 				results.push({
 					team: teamData.teamName,
 					status: 'error',
-					reason: 'No OAuth token found'
+					reason: `No active sniffer found with user ${ownerUsername}`
 				});
-				console.log(`[PLUGIN] No OAuth token found for team ${teamData.teamName}`);
+				console.log(`[PLUGIN] No OAuth token found for user ${ownerUsername} (team ${teamData.teamName})`);
 				continue;
 			}
 			
@@ -173,23 +182,25 @@ async function resetPermanentLiveTitles({ storageManager, peertubeHelpers, setti
 				continue;
 			}
 			
-			// Find OAuth token for this team
+			// Find OAuth token for the team owner's username
 			let snifferOAuthToken = null;
-			const cameraAssignments = (await storageManager.getData('camera-assignments')) || {};
+			const ownerUsername = teamData.ownerUsername;
 			
-			for (const snifferId in cameraAssignments) {
-				const assignments = cameraAssignments[snifferId];
-				for (const cameraId in assignments) {
-					if (assignments[cameraId].teamId === teamId) {
-						snifferOAuthToken = sniffers[snifferId]?.oauthToken;
-						break;
-					}
+			if (!ownerUsername) {
+				console.log(`[PLUGIN] No owner username for team ${teamData.teamName}`);
+				continue;
+			}
+			
+			// Find any sniffer authenticated as this user
+			for (const snifferId in sniffers) {
+				if (sniffers[snifferId]?.peertubeUsername === ownerUsername) {
+					snifferOAuthToken = sniffers[snifferId]?.oauthToken;
+					break;
 				}
-				if (snifferOAuthToken) break;
 			}
 			
 			if (!snifferOAuthToken) {
-				console.log(`[PLUGIN] No OAuth token found for team ${teamData.teamName}`);
+				console.log(`[PLUGIN] No OAuth token found for user ${ownerUsername} (team ${teamData.teamName})`);
 				continue;
 			}
 			

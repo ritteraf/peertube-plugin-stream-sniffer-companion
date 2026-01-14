@@ -160,6 +160,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					logoURL: schedule.logoURL || null,
 					currentSeason: schedule.currentSeason || null,
 					mapped: !!mapping,
+					ownerUsername: mapping?.ownerUsername || null,
 					channelId: mapping ? mapping.channelId : null,
 					cameraId: mapping ? (typeof mapping.cameraId === 'string' ? mapping.cameraId : '') : '',
 					category: mapping && mapping.category !== undefined ? mapping.category : null,
@@ -217,6 +218,20 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		// Save mapping to persistent storage
 		if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
 		let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+		
+		// Get the PeerTube username for the authenticated sniffer
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferData = sniffers[req.snifferId];
+		const ownerUsername = snifferData?.peertubeUsername || null;
+		
+		if (!ownerUsername) {
+			return res.status(400).json({
+				success: false,
+				message: 'PeerTube username not found for this sniffer. Please re-authenticate.',
+				results: []
+			});
+		}
+		
 		const results = [];
 		for (const team of teams) {
 			// Save mapping with team-specific settings
@@ -226,6 +241,8 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				channelId: team.channelId,
 				channelHandle: team.channelHandle,
 				cameraId: typeof team.cameraId === 'string' ? team.cameraId : '',
+				// Owner username - user who configured this team and owns the channel
+				ownerUsername: hudlMappings[team.teamId]?.ownerUsername || ownerUsername,
 				// Per-team video settings (optional, will use camera defaults if not provided)
 				category: team.category !== undefined ? team.category : undefined,
 				privacy: team.privacy !== undefined ? team.privacy : undefined,
@@ -693,6 +710,81 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 			return res.status(500).json({
 				success: false,
 				message: 'Failed to refresh team schedule',
+				error: err.message
+			});
+		}
+	});
+
+	// PATCH /hudl/teams/:teamId/owner - Update team ownership
+	router.patch('/teams/:teamId/owner', requireAuth, async (req, res) => {
+		const { teamId } = req.params;
+		const { ownerUsername } = req.body;
+		
+		if (!teamId || !ownerUsername) {
+			return res.status(400).json({
+				success: false,
+				message: 'teamId and ownerUsername are required'
+			});
+		}
+		
+		if (!storageManager) {
+			return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+		}
+		
+		try {
+			// Verify the new owner exists in sniffers
+			const sniffers = (await storageManager.getData('sniffers')) || {};
+			const ownerExists = Object.values(sniffers).some(
+				sniffer => sniffer.peertubeUsername === ownerUsername
+			);
+			
+			if (!ownerExists) {
+				return res.status(400).json({
+					success: false,
+					message: `No active sniffer found with username ${ownerUsername}`
+				});
+			}
+			
+			// Update team ownership
+			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+			
+			if (!hudlMappings[teamId]) {
+				return res.status(404).json({
+					success: false,
+					message: `Team ${teamId} not found`
+				});
+			}
+			
+			const oldOwner = hudlMappings[teamId].ownerUsername;
+			hudlMappings[teamId].ownerUsername = ownerUsername;
+			
+			// Update playlist ownership for all seasons
+			if (hudlMappings[teamId].seasons) {
+				for (const seasonYear in hudlMappings[teamId].seasons) {
+					if (hudlMappings[teamId].seasons[seasonYear].createdByUser) {
+						hudlMappings[teamId].seasons[seasonYear].createdByUser = ownerUsername;
+					}
+				}
+			}
+			
+			await storageManager.storeData('hudl-mappings', hudlMappings);
+			
+			console.log(`[PLUGIN] Team ${teamId} ownership changed from ${oldOwner || 'unknown'} to ${ownerUsername}`);
+			
+			return res.status(200).json({
+				success: true,
+				teamId,
+				teamName: hudlMappings[teamId].teamName,
+				oldOwner: oldOwner || null,
+				newOwner: ownerUsername,
+				playlistsUpdated: hudlMappings[teamId].seasons ? Object.keys(hudlMappings[teamId].seasons).length : 0
+			});
+			
+		} catch (err) {
+			console.error('[PLUGIN] Error updating team ownership:', err);
+			return res.status(500).json({
+				success: false,
+				message: 'Failed to update team ownership',
 				error: err.message
 			});
 		}

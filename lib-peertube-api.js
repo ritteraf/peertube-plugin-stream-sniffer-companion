@@ -456,7 +456,8 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 						teamSettings.seasons[teamSettings.seasonYear] = {
 							seasonYear: teamSettings.seasonYear,
 							playlistId: newPlaylist.playlistId,
-							playlistName: newPlaylist.displayName
+							playlistName: newPlaylist.displayName,
+							createdByUser: teamSettings.ownerUsername
 						};
 						console.log(`[PLUGIN] Playlist created successfully: ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
 						await updateTeamPermanentLive(snifferId, teamId, {
