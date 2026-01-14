@@ -192,6 +192,10 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			} else if (scheduleData.teamLevel === 'JUNIOR_VARSITY') {
 				levelVariants.push('JV', 'Junior Varsity', 'J.V.');
 			} else if (scheduleData.teamLevel === 'FRESHMAN') {
+				levelVariants.push('Freshman', 'Fresh', 'Frosh');
+			}
+			
+			// Sport name (handle multi-word sports)
 			const sport = scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase().replace(/_/g, ' ');
 			
 			const teamVideos = videos.filter(v => {
