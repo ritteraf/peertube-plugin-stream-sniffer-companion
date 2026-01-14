@@ -177,8 +177,18 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 			if (v.tags && v.tags.includes(teamData.teamName)) {
 				return true;
 			}
-			// Fallback: Check if video title contains team metadata
+			// Fallback: Check if video title contains team metadata AND matches team type
 			if (metadataPattern && v.name && v.name.includes(metadataPattern)) {
+				// Additional check: Distinguish HS vs JH teams to prevent cross-contamination
+				const teamNameUpper = teamData.teamName.toUpperCase();
+				if (teamNameUpper.startsWith('HS ') && level) {
+					// HS team with level (JV/Varsity) - require level in title
+					return v.name.includes(level);
+				} else if (teamNameUpper.startsWith('JH ')) {
+					// JH team - exclude videos with HS-specific level markers
+					return !v.name.includes('JV') && !v.name.includes('Varsity');
+				}
+				// For other teams, simple metadata match is sufficient
 				return true;
 			}
 			return false;
