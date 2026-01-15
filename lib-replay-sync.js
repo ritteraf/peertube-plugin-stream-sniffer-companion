@@ -16,10 +16,10 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 		for (const teamId in hudlMappings) {
 			const teamData = hudlMappings[teamId];
 
-			// Skip if no permanent live or no seasons
-			if (!teamData.permanentLiveVideoId || !teamData.seasons) {
-				continue;
-			}
+			       // Skip if no seasons
+			       if (!teamData.seasons) {
+				       continue;
+			       }
 
 			teamsChecked++;
 
@@ -234,76 +234,94 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 					return true;
 				});
 
+
 				console.log(`[PLUGIN] Filtered ${videos.length} videos to ${teamVideos.length} for team ${teamData.teamName} (gender: ${genderVariants.join('/')}, level: ${levelVariants.join('/')}, sport: ${sport})`);
-				const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=500`, {
-					headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
-				});
-
-
-				// If playlist doesn't exist (404), clear the reference and auto-recreate
-				if (playlistRes.status === 404) {
-					console.log(`[PLUGIN] Playlist ${seasonData.playlistId} no longer exists for ${teamData.teamName}, recreating...`);
-
-					// Clear the stale reference
-					delete seasonData.playlistId;
-					delete seasonData.playlistName;
-
-					// Auto-create new playlist
-					try {
-						const { createPlaylist } = require('./lib-peertube-api.js');
-						const { generatePlaylistTitle } = require('./lib-game-title.js');
-
-						const orgData = (await storageManager.getData('hudl-organization')) || {};
-						const schoolName = orgData.name || 'School';
-						const scheduleData = hudlSchedules[teamId];
-
-						const playlistDisplayName = generatePlaylistTitle(
-							{ gender: scheduleData?.gender, teamLevel: scheduleData?.teamLevel, sport: scheduleData?.sport },
-							schoolName,
-							seasonYear
-						) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;
-
-						const nextYear = parseInt(seasonYear) + 1;
-						const newPlaylist = await createPlaylist({
-							channelId: teamData.channelId,
-							displayName: playlistDisplayName,
-							description: `${schoolName} ${scheduleData?.sport || 'team'} season ${seasonYear}-${nextYear}`,
-							privacy: teamData.privacy !== undefined ? teamData.privacy : 1,
-							oauthToken: snifferOAuthToken,
-							peertubeHelpers,
-							settingsManager
-						});
-
-						seasonData.playlistId = newPlaylist.playlistId;
-						seasonData.playlistName = newPlaylist.displayName;
-						hudlMappings[teamId] = teamData;
-						await storageManager.storeData('hudl-mappings', hudlMappings);
-
-						console.log(`[PLUGIN] Recreated playlist: ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
-					} catch (recreateErr) {
-						results.push({
-							team: teamData.teamName,
-							status: 'error',
-							reason: `Playlist deleted and failed to recreate: ${recreateErr.message}`
-						});
-						console.error(`[PLUGIN] Failed to recreate playlist for ${teamData.teamName}:`, recreateErr);
-						continue;
+				// Fetch all videos in the playlist using pagination (count=100, start=offset)
+				let playlistVideos = [];
+				let start = 0;
+				const count = 100;
+				let playlistFetchOk = true;
+				while (playlistFetchOk) {
+					const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=${count}&start=${start}`, {
+						headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
+					});
+					if (playlistRes.status === 404) {
+						console.log(`[PLUGIN] Playlist ${seasonData.playlistId} no longer exists for ${teamData.teamName}, recreating...`);
+						// Clear the stale reference
+						delete seasonData.playlistId;
+						delete seasonData.playlistName;
+						// Auto-create new playlist
+						try {
+							const { createPlaylist } = require('./lib-peertube-api.js');
+							const { generatePlaylistTitle } = require('./lib-game-title.js');
+							const orgData = (await storageManager.getData('hudl-organization')) || {};
+							const schoolName = orgData.name || 'School';
+							const scheduleData = hudlSchedules[teamId];
+							const playlistDisplayName = generatePlaylistTitle(
+								{ gender: scheduleData?.gender, teamLevel: scheduleData?.teamLevel, sport: scheduleData?.sport },
+								schoolName,
+								seasonYear
+							) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;
+							const nextYear = parseInt(seasonYear) + 1;
+							const newPlaylist = await createPlaylist({
+								channelId: teamData.channelId,
+								displayName: playlistDisplayName,
+								description: `${schoolName} ${scheduleData?.sport || 'team'} season ${seasonYear}-${nextYear}`,
+								privacy: teamData.privacy !== undefined ? teamData.privacy : 1,
+								oauthToken: snifferOAuthToken,
+								peertubeHelpers,
+								settingsManager
+							});
+							seasonData.playlistId = newPlaylist.playlistId;
+							seasonData.playlistName = newPlaylist.displayName;
+							hudlMappings[teamId] = teamData;
+							await storageManager.storeData('hudl-mappings', hudlMappings);
+							console.log(`[PLUGIN] Recreated playlist: ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
+						} catch (recreateErr) {
+							results.push({
+								team: teamData.teamName,
+								status: 'error',
+								reason: `Playlist deleted and failed to recreate: ${recreateErr.message}`
+							});
+							console.error(`[PLUGIN] Failed to recreate playlist for ${teamData.teamName}:`, recreateErr);
+							playlistFetchOk = false;
+							break;
+						}
+						playlistFetchOk = false;
+						break;
 					}
+					if (!playlistRes.ok) {
+						playlistFetchOk = false;
+						break;
+					}
+					const json = await playlistRes.json();
+					const batch = json.data || [];
+					playlistVideos = playlistVideos.concat(batch);
+					if (batch.length < count) {
+						playlistFetchOk = false;
+						break;
+					}
+					start += count;
 				}
-
-				const playlistVideos = playlistRes.ok ? (await playlistRes.json()).data : [];
 				const playlistVideoIds = new Set(playlistVideos.map(v => v.video.id));
 
 				// Find replays not in playlist
 				// Replays: not live, not the permanent live video itself, created this season
 				// Use July 1st of season year as cutoff (e.g., July 1 2025 for 2025-2026 season)
 				const seasonStart = new Date(seasonYear, 6, 1); // Month 6 = July (0-indexed)
-				const replays = teamVideos.filter(v =>
-					!v.isLive &&
-					v.id !== teamData.permanentLiveVideoId &&
-					new Date(v.createdAt) >= seasonStart &&
-					!playlistVideoIds.has(v.id)
-				);
+				const replays = teamVideos.filter(v => {
+					// Use originallyPublishedAt if present, else publishedAt
+					const dateStr = v.originallyPublishedAt || v.publishedAt;
+					if (!dateStr) return false;
+					const publishedDate = new Date(dateStr);
+					if (isNaN(publishedDate.getTime())) return false;
+					return (
+						!v.isLive &&
+						v.id !== teamData.permanentLiveVideoId &&
+						publishedDate >= seasonStart &&
+						!playlistVideoIds.has(v.id)
+					);
+				});
 
 				// Scrimmage logic: If a video is a scrimmage, add to both Varsity and JV playlists for same sport/gender
 				const isScrimmage = (video) => {
@@ -466,7 +484,202 @@ async function resetPermanentLiveTitles({ storageManager, peertubeHelpers, setti
 	}
 }
 
+
+// Utility: Normalize gender, team level, and school names for imported YouTube videos
+function normalizeImportedMetadata({ gender, teamLevel, schoolName }) {
+	// Gender normalization
+	let normGender = gender;
+	if (/girls?/i.test(gender)) normGender = 'WOMENS';
+	else if (/boys?/i.test(gender)) normGender = 'MENS';
+	else if (/womens?/i.test(gender)) normGender = 'WOMENS';
+	else if (/mens?/i.test(gender)) normGender = 'MENS';
+
+	// Team level normalization
+	let normLevel = teamLevel;
+	if (/freshmen/i.test(teamLevel)) normLevel = 'JV';
+	else if (/varsity/i.test(teamLevel)) normLevel = 'VARSITY';
+	else if (/jv/i.test(teamLevel)) normLevel = 'JV';
+
+	// School name normalization
+	let normSchool = schoolName;
+	if (/elkhorn valley|evs|ev/i.test(schoolName)) normSchool = 'Elkhorn Valley';
+
+	return { gender: normGender, teamLevel: normLevel, schoolName: normSchool };
+}
+
+/**
+ * Back-create playlists for all historical seasons for each team, and attempt to assign imported videos.
+ * @param {Object} opts - { storageManager, peertubeHelpers, settingsManager }
+ */
+async function backCreateHistoricalPlaylists({ storageManager, peertubeHelpers, settingsManager }) {
+	console.log('[PLUGIN] Starting back-creation of historical playlists...');
+	const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+	const hudlSchedules = (await storageManager.getData('hudl-schedules')) || {};
+	const sniffers = (await storageManager.getData('sniffers')) || {};
+	const { createPlaylist, addVideoToPlaylist } = require('./lib-peertube-api.js');
+	const { generatePlaylistTitle } = require('./lib-game-title.js');
+
+	let playlistsCreated = 0;
+	let videosAssigned = 0;
+	const results = [];
+
+	const { updateVideoMetadata } = require('./lib-peertube-api.js');
+	const { generateGameTitle } = require('./lib-game-title.js');
+	const hudl = require('./lib-hudl-scraper.js');
+	for (const teamId in hudlMappings) {
+		const teamData = hudlMappings[teamId];
+		const ownerUsername = teamData.ownerUsername;
+		if (!ownerUsername) continue;
+		let snifferOAuthToken = null;
+		for (const snifferId in sniffers) {
+			if (sniffers[snifferId]?.peertubeUsername === ownerUsername) {
+				snifferOAuthToken = sniffers[snifferId]?.oauthToken;
+				break;
+			}
+		}
+		if (!snifferOAuthToken) continue;
+
+		// Find all historical seasons for this team (from HUDL data)
+		const teamSeasons = teamData.seasons ? Object.keys(teamData.seasons) : [];
+		for (const seasonYear of teamSeasons) {
+			let seasonData = teamData.seasons[seasonYear];
+			// Fetch HUDL schedule for this team/season
+			let games = [];
+			try {
+				games = await hudl.fetchTeamSchedule(teamId, null, seasonData?.seasonId || null);
+			} catch (err) {
+				console.error(`[PLUGIN] Failed to fetch HUDL schedule for team ${teamData.teamName} season ${seasonYear}:`, err.message);
+				continue;
+			}
+			// Fetch all videos for the channel using pagination (count=100, start=offset)
+			const baseUrl = await peertubeHelpers.config.getWebserverUrl();
+			const channelHandle = teamData.channelHandle;
+			if (!channelHandle) continue;
+			let videos = [];
+			let start = 0;
+			const count = 100;
+			try {
+				while (true) {
+					const res = await fetch(`${baseUrl}/api/v1/video-channels/${encodeURIComponent(channelHandle)}/videos?count=${count}&start=${start}`, {
+						headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
+					});
+					if (!res.ok) break;
+					const json = await res.json();
+					const batch = json.data || [];
+					videos = videos.concat(batch);
+					if (batch.length < count) break; // last page
+					start += count;
+				}
+			} catch (err) {
+				console.error(`[PLUGIN] Failed to fetch videos for channel ${channelHandle}:`, err.message);
+				continue;
+			}
+			// For each HUDL game, match videos by date
+			let foundMatch = false;
+			for (const game of games) {
+				const gameDate = game.timeUtc ? new Date(game.timeUtc).toISOString().slice(0, 10) : null;
+				if (!gameDate) continue;
+				// Find all videos with originalPublicationDate matching game date
+				const matchedVideos = videos.filter(v => {
+					if (!v.originalPublicationDate) return false;
+					const videoDate = new Date(v.originalPublicationDate).toISOString().slice(0, 10);
+					return videoDate === gameDate;
+				});
+				if (matchedVideos.length === 0) continue;
+				foundMatch = true;
+				// Helper to parse level from video title
+				const parseLevelFromTitle = (title) => {
+					if (!title) return null;
+					const lower = title.toLowerCase();
+					if (/\bjv\b|junior varsity|j\.v\./i.test(lower)) return 'JUNIOR_VARSITY';
+					if (/\bvarsity\b|var\b/i.test(lower)) return 'VARSITY';
+					if (/\bfreshman\b|fresh\b|frosh\b/i.test(lower)) return 'FRESHMAN';
+					return null;
+				};
+				let part = 1;
+				for (const video of matchedVideos) {
+					const parsedLevel = parseLevelFromTitle(video.name);
+					// If level is parsed, only add to matching team; if not, add to both (handled by running for each team)
+					if (parsedLevel && parsedLevel !== teamData.teamLevel) {
+						continue; // skip, this video is for another level
+					}
+					try {
+						// Create playlist if not already created
+						if (!seasonData || !seasonData.playlistId) {
+							const orgData = (await storageManager.getData('hudl-organization')) || {};
+							const schoolName = orgData.name || 'School';
+							const scheduleData = hudlSchedules[teamId] || {};
+							const playlistDisplayName = generatePlaylistTitle(
+								{ gender: scheduleData.gender || teamData.gender || '', teamLevel: scheduleData.teamLevel || teamData.teamLevel || '', sport: scheduleData.sport || teamData.sport },
+								schoolName,
+								seasonYear
+							) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;
+							const nextYear = parseInt(seasonYear) + 1;
+							const newPlaylist = await createPlaylist({
+								channelId: teamData.channelId,
+								displayName: playlistDisplayName,
+								description: `${schoolName} ${scheduleData.sport || teamData.sport || 'team'} season ${seasonYear}-${nextYear}`,
+								privacy: teamData.privacy !== undefined ? teamData.privacy : 1,
+								oauthToken: snifferOAuthToken,
+								peertubeHelpers,
+								settingsManager
+							});
+							if (!teamData.seasons) teamData.seasons = {};
+							teamData.seasons[seasonYear] = {
+								seasonYear: seasonYear,
+								playlistId: newPlaylist.playlistId,
+								playlistName: newPlaylist.displayName,
+								createdByUser: ownerUsername
+							};
+							hudlMappings[teamId] = teamData;
+							await storageManager.storeData('hudl-mappings', hudlMappings);
+							playlistsCreated++;
+							seasonData = teamData.seasons[seasonYear];
+							console.log(`[PLUGIN] Back-created playlist ${newPlaylist.displayName} (ID: ${newPlaylist.playlistId})`);
+						}
+						await addVideoToPlaylist({
+							playlistId: seasonData.playlistId,
+							videoId: video.id,
+							oauthToken: snifferOAuthToken,
+							peertubeHelpers,
+							settingsManager
+						});
+						videosAssigned++;
+						// Generate standardized title
+						let newTitle = generateGameTitle(game, teamData, (hudlSchedules[teamId]?.schoolName || ''));
+						if (matchedVideos.length > 1) newTitle += ` (Part ${part})`;
+						// Update video title if needed
+						if (video.name !== newTitle) {
+							// Add old name to description if not already present
+							let newDescription = video.description || '';
+							const oldNameTag = `\n[Original title: ${video.name}]`;
+							if (!newDescription.includes(`[Original title:`)) {
+								newDescription += oldNameTag;
+							}
+							await updateVideoMetadata({
+								videoId: video.id,
+								updates: { name: newTitle, description: newDescription },
+								oauthToken: snifferOAuthToken,
+								peertubeHelpers,
+								settingsManager
+							});
+							console.log(`[PLUGIN] Updated video title: ${video.name} → ${newTitle} (old name preserved in description)`);
+						}
+						part++;
+					} catch (err) {
+						console.error(`[PLUGIN] Failed to add/update video ${video.id} for game on ${gameDate}:`, err.message);
+					}
+				}
+			}
+			// If no match was found, do not create a playlist
+		}
+	}
+	console.log(`[PLUGIN] Back-creation complete: ${playlistsCreated} playlists created, ${videosAssigned} videos assigned/updated`);
+	return { playlistsCreated, videosAssigned };
+}
+
 module.exports = {
 	syncReplaysToPlaylists,
-	resetPermanentLiveTitles
+	resetPermanentLiveTitles,
+	backCreateHistoricalPlaylists
 };

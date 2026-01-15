@@ -52,6 +52,11 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
   const { syncReplaysToPlaylists, resetPermanentLiveTitles } = require('./lib-replay-sync.js');
   
   async function autoRefreshHudlSchedules() {
+    // Check for global refresh lock (set by backfill or other long-running refresh)
+    if (global.__HUDL_REFRESH_LOCK__ && global.__HUDL_REFRESH_LOCK__.expiresAt > Date.now()) {
+      console.log('[PLUGIN HUDL auto-refresh] Skipping auto-refresh: another refresh (likely backfill) is in progress.');
+      return;
+    }
     try {
       const settings = await getPluginSettings();
       const hudlOrgUrl = settings['hudl-org-url'] || process.env.HUDL_ORG_URL || '';

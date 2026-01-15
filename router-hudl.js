@@ -1,13 +1,19 @@
-// HUDL endpoints
-
 // Export a factory function for dependency injection
-let globalRefreshLock = null;
+// Use a true global lock for refresh/backfill
+if (!global.__HUDL_REFRESH_LOCK__) global.__HUDL_REFRESH_LOCK__ = null;
+
 
 module.exports = function createHudlRouter({ storageManager, settingsManager, peertubeHelpers }) {
-	// ...existing code...
 	const express = require('express');
 	const router = express.Router();
-	// ...existing code...
+	const { requireAuth } = require('./lib-auth-manager.js');
+
+	// GET /hudl/refresh-status - Returns whether a refresh/backfill is in progress
+	router.get('/refresh-status', requireAuth, (req, res) => {
+		const inProgress = isRefreshInProgress();
+		res.json({ refreshInProgress: inProgress });
+	});
+
 	// Serve matchup thumbnail images directly
 	const path = require('path');
 	const fs = require('fs');
@@ -62,24 +68,23 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 			}
 		})();
 	}
-	// (removed duplicate router initialization)
-	const { requireAuth } = require('./lib-auth-manager.js');
+
 
 	// Centralized HUDL rate limiter
 	const hudlLimiter = require('./lib-hudl-rate-limiter.js');
 
 	// Helper to check and set global refresh lock
 	function isRefreshInProgress() {
-		return globalRefreshLock && globalRefreshLock.expiresAt > Date.now();
+		return global.__HUDL_REFRESH_LOCK__ && global.__HUDL_REFRESH_LOCK__.expiresAt > Date.now();
 	}
 	function setGlobalRefreshLock(timeoutMs = 10 * 60 * 1000) { // default 10 min
-		globalRefreshLock = {
+		global.__HUDL_REFRESH_LOCK__ = {
 			startedAt: new Date(),
 			expiresAt: Date.now() + timeoutMs
 		};
 	}
 	function clearGlobalRefreshLock() {
-		globalRefreshLock = null;
+		global.__HUDL_REFRESH_LOCK__ = null;
 	}
 	function getNextAutoRefreshAt() {
 		// Return the adaptive auto-refresh time from main.js
@@ -218,12 +223,12 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		// Save mapping to persistent storage
 		if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
 		let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
-		
+
 		// Get the PeerTube username for the authenticated sniffer
 		const sniffers = (await storageManager.getData('sniffers')) || {};
 		const snifferData = sniffers[req.snifferId];
 		const ownerUsername = snifferData?.peertubeUsername || null;
-		
+
 		if (!ownerUsername) {
 			return res.status(400).json({
 				success: false,
@@ -231,7 +236,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				results: []
 			});
 		}
-		
+
 		const results = [];
 		for (const team of teams) {
 			// Save mapping with team-specific settings
@@ -719,60 +724,60 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 	router.patch('/teams/:teamId/owner', requireAuth, async (req, res) => {
 		const { teamId } = req.params;
 		const { ownerUsername } = req.body;
-		
+
 		if (!teamId || !ownerUsername) {
 			return res.status(400).json({
 				success: false,
 				message: 'teamId and ownerUsername are required'
 			});
 		}
-		
+
 		if (!storageManager) {
 			return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
 		}
-		
+
 		try {
 			// Verify the new owner exists in sniffers
 			const sniffers = (await storageManager.getData('sniffers')) || {};
 			const ownerSnifferEntry = Object.values(sniffers).find(
 				sniffer => sniffer.peertubeUsername === ownerUsername
 			);
-			
+
 			if (!ownerSnifferEntry) {
 				return res.status(400).json({
 					success: false,
 					message: `No active sniffer found with username ${ownerUsername}`
 				});
 			}
-			
+
 			// Get team mapping
 			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
-			
+
 			if (!hudlMappings[teamId]) {
 				return res.status(404).json({
 					success: false,
 					message: `Team ${teamId} not found`
 				});
 			}
-			
+
 			const teamMapping = hudlMappings[teamId];
 			const channelId = teamMapping.channelId;
-			
+
 			// Validate channel ownership - fetch channel details from PeerTube
 			if (channelId) {
 				try {
 					const fetch = require('node-fetch');
 					const baseUrl = await peertubeHelpers.config.getWebserverUrl();
-					
+
 					// Use owner's OAuth token to fetch channel details
 					const channelRes = await fetch(`${baseUrl}/api/v1/video-channels/${channelId}`, {
 						headers: { 'Authorization': `Bearer ${ownerSnifferEntry.oauthToken}` }
 					});
-					
+
 					if (channelRes.ok) {
 						const channelData = await channelRes.json();
 						const channelOwnerUsername = channelData.ownerAccount?.name || null;
-						
+
 						if (channelOwnerUsername && channelOwnerUsername !== ownerUsername) {
 							// Channel ownership mismatch - reject the transfer
 							return res.status(400).json({
@@ -794,10 +799,10 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					// Continue with transfer if validation fails (don't block on network errors)
 				}
 			}
-			
+
 			const oldOwner = teamMapping.ownerUsername;
 			teamMapping.ownerUsername = ownerUsername;
-			
+
 			// Update playlist ownership for all seasons
 			if (teamMapping.seasons) {
 				for (const seasonYear in teamMapping.seasons) {
@@ -806,12 +811,12 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					}
 				}
 			}
-			
+
 			hudlMappings[teamId] = teamMapping;
 			await storageManager.storeData('hudl-mappings', hudlMappings);
-			
+
 			console.log(`[PLUGIN] Team ${teamId} ownership changed from ${oldOwner || 'unknown'} to ${ownerUsername}`);
-			
+
 			return res.status(200).json({
 				success: true,
 				teamId,
@@ -820,7 +825,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				newOwner: ownerUsername,
 				playlistsUpdated: teamMapping.seasons ? Object.keys(teamMapping.seasons).length : 0
 			});
-			
+
 		} catch (err) {
 			console.error('[PLUGIN] Error updating team ownership:', err);
 			return res.status(500).json({
@@ -836,12 +841,12 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		try {
 			const { syncReplaysToPlaylists } = require('./lib-replay-sync.js');
 			const result = await syncReplaysToPlaylists({ storageManager, peertubeHelpers, settingsManager });
-			
+
 			return res.status(200).json({
 				success: true,
 				...result
 			});
-			
+
 		} catch (err) {
 			console.error('[PLUGIN] Error in manual replay sync:', err);
 			return res.status(500).json({
@@ -857,7 +862,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 		try {
 			let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
 			let clearedCount = 0;
-			
+
 			for (const teamId in hudlMappings) {
 				const teamData = hudlMappings[teamId];
 				if (teamData.seasons) {
@@ -875,9 +880,9 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					clearedCount++;
 				}
 			}
-			
+
 			await storageManager.storeData('hudl-mappings', hudlMappings);
-			
+
 			return res.status(200).json({
 				success: true,
 				clearedCount,
@@ -889,6 +894,74 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				success: false,
 				error: err.message
 			});
+		}
+	});
+
+	// POST /hudl/backfill-seasons (manual, secure, sequential, logs progress)
+	router.post('/backfill-seasons', requireAuth, async (req, res) => {
+		const hudl = require('./lib-hudl-scraper.js');
+		// Set the global refresh lock for the duration of the backfill
+		setGlobalRefreshLock(2 * 60 * 60 * 1000); // 2 hours, adjust as needed
+		try {
+			if (!storageManager) return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+			let hudlSchedules = (await storageManager.getData('hudl-schedules')) || {};
+			let teamIds = Object.keys(hudlSchedules);
+			if (teamIds.length === 0) {
+				return res.status(400).json({ success: false, message: 'No teams found in hudl-schedules.' });
+			}
+			const sniffers = (await storageManager.getData('sniffers')) || {};
+			// Use the snifferId from the authenticated request
+			const snifferId = req.snifferId;
+			if (!snifferId || !sniffers[snifferId]) {
+				return res.status(401).json({ success: false, message: 'Sniffer authentication required.' });
+			}
+			let totalSeasons = 0;
+			let totalGames = 0;
+			let errors = [];
+			for (const teamId of teamIds) {
+				try {
+					// Fetch all seasons for this team
+					const seasons = await hudl.fetchTeamSeasons(teamId, snifferId);
+					hudlSchedules[teamId].allSeasons = seasons;
+					totalSeasons += seasons.length;
+					console.log(`[BACKFILL] Team ${teamId}: Found ${seasons.length} seasons.`);
+					// For each season, fetch the schedule
+					hudlSchedules[teamId].seasonSchedules = {};
+					for (const season of seasons) {
+						try {
+							const games = await hudl.fetchTeamSchedule(teamId, snifferId, season.seasonId);
+							hudlSchedules[teamId].seasonSchedules[season.seasonId] = games;
+							totalGames += games.length;
+							console.log(`[BACKFILL] Team ${teamId} Season ${season.year}: ${games.length} games.`);
+							// Throttle: random 5-10s delay between each season schedule fetch
+							const seasonDelay = 5000 + Math.floor(Math.random() * 5000); // 5-10s
+							console.log(`[BACKFILL] Waiting ${seasonDelay / 1000}s before next season...`);
+							await new Promise(r => setTimeout(r, seasonDelay));
+						} catch (err) {
+							errors.push({ teamId, seasonId: season.seasonId, error: err.message });
+							console.warn(`[BACKFILL] Failed to fetch schedule for team ${teamId} season ${season.year}: ${err.message}`);
+						}
+					}
+					// Throttle: random 20-25s delay between teams
+					const teamDelay = 20000 + Math.floor(Math.random() * 5000); // 20-25s
+					console.log(`[BACKFILL] Waiting ${teamDelay / 1000}s before next team...`);
+					await new Promise(r => setTimeout(r, teamDelay));
+				} catch (err) {
+					errors.push({ teamId, error: err.message });
+					console.warn(`[BACKFILL] Failed to fetch seasons for team ${teamId}: ${err.message}`);
+				}
+			}
+			await storageManager.storeData('hudl-schedules', hudlSchedules);
+			console.log(`[BACKFILL] Complete: ${teamIds.length} teams, ${totalSeasons} seasons, ${totalGames} games. Errors: ${errors.length}`);
+			return res.status(200).json({
+				success: true,
+				teams: teamIds.length,
+				totalSeasons,
+				totalGames,
+				errors
+			});
+		} finally {
+			clearGlobalRefreshLock();
 		}
 	});
 

@@ -42,6 +42,7 @@ class HudlRateLimiter {
       } catch (e) {
         reject(e);
       }
+      console.log(`[HUDL RateLimiter] Waiting ${this.minDelayMs}ms before next request...`);
       await new Promise(r => setTimeout(r, this.minDelayMs));
     }
     this.isProcessing = false;
@@ -49,8 +50,9 @@ class HudlRateLimiter {
 }
 
 // Singleton instance (shared across all plugin code)
+
 if (!global.__HUDL_RATE_LIMITER__) {
-  global.__HUDL_RATE_LIMITER__ = new HudlRateLimiter({ minDelayMs: 10000, maxRequestsPerDay: 200 });
+  global.__HUDL_RATE_LIMITER__ = new HudlRateLimiter({ minDelayMs: 10000, maxRequestsPerDay: 300 });
 }
 
 module.exports = global.__HUDL_RATE_LIMITER__;

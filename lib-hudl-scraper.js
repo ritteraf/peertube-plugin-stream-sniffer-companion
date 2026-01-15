@@ -3,24 +3,8 @@
 const fetch = require('node-fetch');
 
 const HUDL_GRAPHQL_URL = 'https://www.hudl.com/api/public/graphql/query';
-const RATE_LIMIT = 15;
-const WINDOW_MS = 60 * 1000;
-const rateLimitMap = {};
-
-function checkRateLimit(snifferId) {
-	const now = Date.now();
-	if (!rateLimitMap[snifferId]) rateLimitMap[snifferId] = [];
-	rateLimitMap[snifferId] = rateLimitMap[snifferId].filter(ts => now - ts < WINDOW_MS);
-	if (rateLimitMap[snifferId].length >= RATE_LIMIT) return false;
-	rateLimitMap[snifferId].push(now);
-	return true;
-}
 
 async function hudlGraphQL({ query, variables, operationName, snifferId }) {
-	if (!checkRateLimit(snifferId)) {
-		console.warn(`[PLUGIN HUDL] Per-sniffer internal rate limit exceeded for snifferId: ${snifferId}`);
-		throw new Error('HUDL internal rate limit exceeded');
-	}
 	const res = await fetch(HUDL_GRAPHQL_URL, {
 		method: 'POST',
 		headers: {
@@ -78,14 +62,32 @@ async function fetchSchoolData(orgUrl, snifferId) {
 	return data.school;
 }
 
-// Fetch current season for a team
-async function fetchTeamSeason(teamId, snifferId) {
+
+// Fetch all seasons for a team (returns array of { seasonId, year, seasonRecord })
+async function fetchTeamSeasons(teamId, snifferId) {
 	const query = `
-		query Web_Fan_GetTeamSeasonAndHistory_r1($teamId: ID) {
-			teamHeader(teamId: $teamId) {
+		query Web_Fan_GetTeamSeasonAndHistory_r1($teamId: ID, $internalTeamId: String) {
+			teamHeader(teamId: $teamId, internalTeamId: $internalTeamId) {
 				currentSeason {
 					seasonId
 					year
+					seasonRecord {
+						wins
+						losses
+						draws
+						__typename
+					}
+					__typename
+				}
+				seasons {
+					seasonId
+					year
+					seasonRecord {
+						wins
+						losses
+						draws
+						__typename
+					}
 					__typename
 				}
 				__typename
@@ -94,8 +96,16 @@ async function fetchTeamSeason(teamId, snifferId) {
 	`;
 	const variables = { teamId };
 	const data = await hudlGraphQL({ query, variables, operationName: 'Web_Fan_GetTeamSeasonAndHistory_r1', snifferId });
-	if (!data.teamHeader || !data.teamHeader.currentSeason) throw new Error('HUDL: No current season for team');
-	return data.teamHeader.currentSeason;
+	if (!data.teamHeader || !data.teamHeader.seasons) throw new Error('HUDL: No seasons for team');
+	return data.teamHeader.seasons;
+}
+
+// Fetch current season for a team (legacy, returns just the current season)
+async function fetchTeamSeason(teamId, snifferId) {
+	const seasons = await fetchTeamSeasons(teamId, snifferId);
+	// Find the most recent season (highest year)
+	if (!seasons || !seasons.length) throw new Error('HUDL: No seasons for team');
+	return seasons.reduce((a, b) => (a.year > b.year ? a : b));
 }
 
 // Fetch schedule for a team (returns array of games)
@@ -140,6 +150,7 @@ module.exports = {
 	hudlGraphQL,
 	fetchSchoolData,
 	fetchTeamSeason,
+	fetchTeamSeasons,
 	fetchTeamSchedule,
 	extractOrgId,
 	validateOrgUrl
