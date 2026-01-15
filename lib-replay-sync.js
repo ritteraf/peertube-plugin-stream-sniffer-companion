@@ -305,6 +305,44 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 					!playlistVideoIds.has(v.id)
 				);
 
+				// Scrimmage logic: If a video is a scrimmage, add to both Varsity and JV playlists for same sport/gender
+				const isScrimmage = (video) => {
+					const text = (video.name || '') + ' ' + (video.tags ? video.tags.join(' ') : '');
+					return /\b(scrim|scrimmage)\b/i.test(text);
+				};
+
+				const sameSportGenderTeams = Object.entries(hudlMappings)
+					.filter(([otherId, otherData]) =>
+						otherData.sport === teamData.sport &&
+						otherData.gender === teamData.gender &&
+						['VARSITY', 'JUNIOR_VARSITY'].includes(otherData.teamLevel)
+					)
+					.map(([otherId]) => otherId);
+
+				// For scrimmage videos, add to both Varsity and JV playlists for same sport/gender
+				for (const replay of replays) {
+					if (isScrimmage(replay)) {
+						for (const otherTeamId of sameSportGenderTeams) {
+							const otherTeamData = hudlMappings[otherTeamId];
+							const otherSeasonData = otherTeamData.seasons?.[seasonYear];
+							if (otherSeasonData && otherSeasonData.playlistId) {
+								try {
+									await addVideoToPlaylist({
+										playlistId: otherSeasonData.playlistId,
+										videoId: replay.id,
+										oauthToken: snifferOAuthToken,
+										peertubeHelpers,
+										settingsManager
+									});
+									console.log(`[PLUGIN] Added scrimmage replay to playlist: ${replay.name} → ${otherTeamData.teamName} ${seasonYear}`);
+								} catch (err) {
+									console.error(`[PLUGIN] Failed to add scrimmage replay ${replay.id} to playlist for ${otherTeamData.teamName}:`, err.message);
+								}
+							}
+						}
+					}
+				}
+
 				const addedReplays = [];
 
 				// Add replays to playlist

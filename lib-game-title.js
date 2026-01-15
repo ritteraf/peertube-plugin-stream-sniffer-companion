@@ -21,12 +21,14 @@ function generateGameTitle(game, teamData, schoolName) {
   const opponent = stripSchoolSuffix(game.opponentDetails?.name) || 'Opponent';
   const eventTitle = game.title || game.name || '';
 
-  // Detect Triangular or Quad event in the event title
+  // Detect Triangular, Quad, or Scrimmage event in the event title
   let eventType = '';
   if (/\b(tri|triangular)\b/i.test(eventTitle)) {
     eventType = 'Triangular';
   } else if (/\b(quad|quad meet)\b/i.test(eventTitle)) {
     eventType = 'Quad';
+  } else if (/\b(scrim|scrimmage)\b/i.test(eventTitle)) {
+    eventType = 'Scrimmage';
   }
 
   // Format gender: MENS → Mens, WOMENS → Womens, COED → Coed
@@ -43,9 +45,9 @@ function generateGameTitle(game, teamData, schoolName) {
   // Build metadata from HUDL fields only: "Mens Varsity Basketball"
   const metadata = [gender, level, sport].filter(p => p).join(' ');
 
-  // If Triangular or Quad, omit opponent and vs/at, and append event type
+  // If Triangular, Quad, or Scrimmage, omit opponent and vs/at, and append event type
   if (eventType) {
-    // "Elkhorn Valley Mens Varsity Wrestling Triangular"
+    // "Elkhorn Valley Mens Varsity Basketball Scrimmage"
     return [homeTeam, metadata, eventType].filter(p => p).join(' ');
   }
 
