@@ -84,7 +84,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 					// Generate consistent playlist title using team metadata
 					const scheduleData = hudlSchedules[teamId];
 					const playlistDisplayName = generatePlaylistTitle(
-						{ gender: scheduleData?.gender, teamLevel: scheduleData?.level, sport: scheduleData?.sport },
+					{ gender: scheduleData?.gender, teamLevel: scheduleData?.teamLevel, sport: scheduleData?.sport },
 						schoolName,
 						seasonYear
 					) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;
@@ -163,78 +163,78 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 
 				// Filter videos by team name tag (primary) or title metadata (fallback)
 				const scheduleData = hudlSchedules[teamId];
-				
-				// STRICT: Require all three HUDL metadata fields
-			if (!scheduleData?.gender || !scheduleData?.teamLevel || !scheduleData?.sport) {
-				results.push({
-					team: teamData.teamName,
-					status: 'error',
-					reason: `Missing HUDL metadata (gender: ${scheduleData?.gender}, level: ${scheduleData?.teamLevel}, sport: ${scheduleData?.sport})`
-				});
-				console.error(`[PLUGIN] Missing HUDL metadata for team ${teamData.teamName}, skipping playlist sync`);
-				continue;
-			}
-			
-			// Build gender variants (we use "Mens"/"Womens" but tags use "Boys"/"Girls")
-			const genderVariants = [];
-			if (scheduleData.gender === 'MENS') {
-				genderVariants.push('Mens', 'Boys', 'Men');
-			} else if (scheduleData.gender === 'WOMENS') {
-				genderVariants.push('Womens', 'Girls', 'Women');
-			} else if (scheduleData.gender === 'COED') {
-				genderVariants.push('Coed');
-			}
-			
-			// Build level variants
-			const levelVariants = [];
-			if (scheduleData.teamLevel === 'VARSITY') {
-				levelVariants.push('Varsity', 'Var');
-			} else if (scheduleData.teamLevel === 'JUNIOR_VARSITY') {
-				levelVariants.push('JV', 'Junior Varsity', 'J.V.');
-			} else if (scheduleData.teamLevel === 'FRESHMAN') {
-				levelVariants.push('Freshman', 'Fresh', 'Frosh');
-			}
-			
-			// Sport name (handle multi-word sports)
-			const sport = scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase().replace(/_/g, ' ');
-			
-			const teamVideos = videos.filter(v => {
-				// Primary: Check if video has team name tag
-				if (v.tags && v.tags.includes(teamData.teamName)) {
-					return true;
-				}
-				
-				// Fallback: Check if video title OR tags contain HUDL metadata (gender + level + sport)
-				if (!v.name) return false;
-				
-				const videoText = v.name + ' ' + (v.tags ? v.tags.join(' ') : '');
-				
-				// Helper: Match with word boundaries to avoid false positives (e.g., "Varsity" shouldn't match "Junior Varsity")
-				const matchesVariant = (text, variants) => {
-					return variants.some(variant => {
-						// Escape special regex characters and use word boundaries
-						const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-						const regex = new RegExp(`\\b${escaped}\\b`, 'i');
-						return regex.test(text);
-					});
-				};
-				
-				// STRICT: Must match gender (at least one variant with word boundaries)
-				const hasGender = matchesVariant(videoText, genderVariants);
-				if (!hasGender) return false;
-				
-				// STRICT: Must match level (at least one variant with word boundaries)
-				const hasLevel = matchesVariant(videoText, levelVariants);
-				if (!hasLevel) return false;
-				
-				// STRICT: Must match sport (with word boundaries)
-				const hasSport = matchesVariant(videoText, [sport]);
-				if (!hasSport) return false;
-				
-				return true;
-			});
 
-			console.log(`[PLUGIN] Filtered ${videos.length} videos to ${teamVideos.length} for team ${teamData.teamName} (gender: ${genderVariants.join('/')}, level: ${levelVariants.join('/')}, sport: ${sport})`);
+				// STRICT: Require all three HUDL metadata fields
+				if (!scheduleData?.gender || !scheduleData?.teamLevel || !scheduleData?.sport) {
+					results.push({
+						team: teamData.teamName,
+						status: 'error',
+						reason: `Missing HUDL metadata (gender: ${scheduleData?.gender}, level: ${scheduleData?.teamLevel}, sport: ${scheduleData?.sport})`
+					});
+					console.error(`[PLUGIN] Missing HUDL metadata for team ${teamData.teamName}, skipping playlist sync`);
+					continue;
+				}
+
+				// Build gender variants (we use "Mens"/"Womens" but tags use "Boys"/"Girls")
+				const genderVariants = [];
+				if (scheduleData.gender === 'MENS') {
+					genderVariants.push('Mens', 'Boys', 'Men');
+				} else if (scheduleData.gender === 'WOMENS') {
+					genderVariants.push('Womens', 'Girls', 'Women');
+				} else if (scheduleData.gender === 'COED') {
+					genderVariants.push('Coed');
+				}
+
+				// Build level variants
+				const levelVariants = [];
+				if (scheduleData.teamLevel === 'VARSITY') {
+					levelVariants.push('Varsity', 'Var');
+				} else if (scheduleData.teamLevel === 'JUNIOR_VARSITY') {
+					levelVariants.push('JV', 'Junior Varsity', 'J.V.');
+				} else if (scheduleData.teamLevel === 'FRESHMAN') {
+					levelVariants.push('Freshman', 'Fresh', 'Frosh');
+				}
+
+				// Sport name (handle multi-word sports)
+				const sport = scheduleData.sport.charAt(0) + scheduleData.sport.slice(1).toLowerCase().replace(/_/g, ' ');
+
+				const teamVideos = videos.filter(v => {
+					// Primary: Check if video has team name tag
+					if (v.tags && v.tags.includes(teamData.teamName)) {
+						return true;
+					}
+
+					// Fallback: Check if video title OR tags contain HUDL metadata (gender + level + sport)
+					if (!v.name) return false;
+
+					const videoText = v.name + ' ' + (v.tags ? v.tags.join(' ') : '');
+
+					// Helper: Match with word boundaries to avoid false positives (e.g., "Varsity" shouldn't match "Junior Varsity")
+					const matchesVariant = (text, variants) => {
+						return variants.some(variant => {
+							// Escape special regex characters and use word boundaries
+							const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+							const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+							return regex.test(text);
+						});
+					};
+
+					// STRICT: Must match gender (at least one variant with word boundaries)
+					const hasGender = matchesVariant(videoText, genderVariants);
+					if (!hasGender) return false;
+
+					// STRICT: Must match level (at least one variant with word boundaries)
+					const hasLevel = matchesVariant(videoText, levelVariants);
+					if (!hasLevel) return false;
+
+					// STRICT: Must match sport (with word boundaries)
+					const hasSport = matchesVariant(videoText, [sport]);
+					if (!hasSport) return false;
+
+					return true;
+				});
+
+				console.log(`[PLUGIN] Filtered ${videos.length} videos to ${teamVideos.length} for team ${teamData.teamName} (gender: ${genderVariants.join('/')}, level: ${levelVariants.join('/')}, sport: ${sport})`);
 				const playlistRes = await fetch(`${baseUrl}/api/v1/video-playlists/${seasonData.playlistId}/videos?count=500`, {
 					headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
 				});
@@ -258,7 +258,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 						const scheduleData = hudlSchedules[teamId];
 
 						const playlistDisplayName = generatePlaylistTitle(
-							{ gender: scheduleData?.gender, teamLevel: scheduleData?.level, sport: scheduleData?.sport },
+							{ gender: scheduleData?.gender, teamLevel: scheduleData?.teamLevel, sport: scheduleData?.sport },
 							schoolName,
 							seasonYear
 						) || `${teamData.teamName} ${seasonYear}-${parseInt(seasonYear) + 1}`;

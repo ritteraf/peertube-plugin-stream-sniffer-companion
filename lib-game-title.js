@@ -19,9 +19,15 @@ function generateGameTitle(game, teamData, schoolName) {
 
   const homeTeam = stripSchoolSuffix(schoolName) || 'Home Team';
   const opponent = stripSchoolSuffix(game.opponentDetails?.name) || 'Opponent';
+  const eventTitle = game.title || game.name || '';
 
-  // Home vs Away
-  const vsOrAt = game.scheduleEntryLocation === 2 ? 'at' : 'vs';
+  // Detect Triangular or Quad event in the event title
+  let eventType = '';
+  if (/\b(tri|triangular)\b/i.test(eventTitle)) {
+    eventType = 'Triangular';
+  } else if (/\b(quad|quad meet)\b/i.test(eventTitle)) {
+    eventType = 'Quad';
+  }
 
   // Format gender: MENS → Mens, WOMENS → Womens, COED → Coed
   const genderMap = { MENS: 'Mens', WOMENS: 'Womens', COED: 'Coed' };
@@ -36,10 +42,17 @@ function generateGameTitle(game, teamData, schoolName) {
 
   // Build metadata from HUDL fields only: "Mens Varsity Basketball"
   const metadata = [gender, level, sport].filter(p => p).join(' ');
-  
+
+  // If Triangular or Quad, omit opponent and vs/at, and append event type
+  if (eventType) {
+    // "Elkhorn Valley Mens Varsity Wrestling Triangular"
+    return [homeTeam, metadata, eventType].filter(p => p).join(' ');
+  }
+
+  // Home vs Away
+  const vsOrAt = game.scheduleEntryLocation === 2 ? 'at' : 'vs';
   // Build title: "Elkhorn Valley vs Pierce Mens Varsity Basketball"
   const titleParts = [homeTeam, vsOrAt, opponent, metadata].filter(p => p);
-
   return titleParts.join(' ');
 }
 

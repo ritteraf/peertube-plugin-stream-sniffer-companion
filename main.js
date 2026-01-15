@@ -78,6 +78,13 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
       let schedules = (await storageManager.getData('hudl-schedules')) || {};
       let matchupCount = 0;
       for (const team of teamHeaders) {
+        // Validate non-optional HUDL team fields
+        const requiredFields = ['id', 'internalId', 'name', 'sport', 'gender', 'teamLevel', 'currentSeasonYear', '__typename'];
+        const missingFields = requiredFields.filter(f => team[f] === undefined || team[f] === null);
+        if (missingFields.length > 0) {
+          console.error(`[PLUGIN HUDL auto-refresh] Team ${team.name || team.id} is missing required fields:`, missingFields);
+          continue; // Skip this team
+        }
         let games = [];
         let error = null;
         try {
@@ -354,14 +361,7 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
     required: false,
     description: "This is your HUDL 'fan' page. You can find this by searching for your school at fan.hudl.com"
   });
-  registerSetting({
-    name: 'schedule-cache-minutes',
-    label: 'HUDL Schedule refresh interval (minutes)',
-    type: 'input',
-    required: false,
-    description: 'This value will control how often the plugin will check HUDL for updates to your team schedules. You can always manually refresh the team schedules inside your sniffer app.',
-    default: 60
-  });
+  // Removed HUDL schedule refresh interval setting. Refresh is now fully controlled internally.
 }
 
 async function unregister() {

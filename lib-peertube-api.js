@@ -201,9 +201,9 @@ async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManag
 function parseTeamTags(gender, teamLevel, sport) {
 	const tags = [];
 
-	// Gender tags (match sniffer's displayGender conversion)
-	if (gender === 'MENS') tags.push('Boys');
-	else if (gender === 'WOMENS') tags.push('Girls');
+	// Gender tags: use HUDL values, but capitalize for tags
+	if (gender === 'MENS') tags.push('Mens');
+	else if (gender === 'WOMENS') tags.push('Womens');
 	else if (gender === 'COED') tags.push('Coed');
 
 	// Level tags (match sniffer's displayLevel conversion)
