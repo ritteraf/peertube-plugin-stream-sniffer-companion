@@ -430,6 +430,20 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					.replace(/\b\w/g, c => c.toUpperCase());
 			}
 
+			// Load latest HUDL org/team data for fallback
+			let hudlOrg = null;
+			let hudlTeams = [];
+			try {
+				const cachedOrg = await storageManager.getData('hudl-organization');
+				if (cachedOrg && cachedOrg.orgURL) {
+					const hudl = require('./lib-hudl-scraper.js');
+					hudlOrg = await hudl.fetchSchoolData(cachedOrg.orgURL);
+					hudlTeams = hudlOrg.teamHeaders || [];
+				}
+			} catch (e) {
+				// Fallback: no HUDL data available
+			}
+
 			teams = await Promise.all(teams.map(async team => {
 				const mapping = hudlMappings[team.teamId] || {};
 				const cameraId = mapping.cameraId || null;
@@ -483,11 +497,17 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 						return { ...g, matchupThumbnailUrl };
 					});
 				}
+				// Fallback for missing level: use HUDL data if available
+				let level = team.level;
+				if ((!level || typeof level !== 'string' || !level.trim()) && hudlTeams.length > 0) {
+					const hudlTeam = hudlTeams.find(t => t.id === team.teamId);
+					if (hudlTeam && hudlTeam.teamLevel) level = hudlTeam.teamLevel;
+				}
 				// Format gender, level, sport fields for API response
 				return {
 					...team,
 					gender: formatTagField(team.gender),
-					level: formatTagField(team.level),
+					level: formatTagField(level),
 					sport: formatTagField(team.sport),
 					cameraId,
 					channelId,
