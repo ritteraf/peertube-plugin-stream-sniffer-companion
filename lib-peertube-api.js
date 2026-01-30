@@ -212,9 +212,24 @@ function parseTeamTags(gender, teamLevel, sport) {
 	else if (teamLevel === 'FRESHMAN') tags.push('Freshman');
 	// Skip "OTHER" - team name usually contains level
 
-	// Sport is not included in tags - it's defined by the channel
+	// Add sport as a tag (capitalize first letter, rest lowercase)
+	if (sport && typeof sport === 'string') {
+		// Convert e.g. "BASKETBALL" to "Basketball"
+		tags.push(sport.charAt(0).toUpperCase() + sport.slice(1).toLowerCase());
+	}
 
 	return tags;
+}
+
+// Helper: Combine system tags and user tags, enforcing PeerTube's 5-tag limit (system tags first)
+function buildVideoTags({ gender, teamLevel, sport, customTags }) {
+	const systemTags = parseTeamTags(gender, teamLevel, sport);
+	let tags = [...systemTags];
+	if (Array.isArray(customTags) && customTags.length > 0) {
+		// Only add as many custom tags as will fit (max 5 total)
+		tags = tags.concat(customTags.slice(0, 5 - tags.length));
+	}
+	return tags.slice(0, 5);
 }
 
 // Helper: Create PeerTube live video
@@ -500,7 +515,13 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 		const channelId = teamSettings.channelId;
 		const category = teamSettings.category;
 		const privacy = teamSettings.privacy;
-		const tags = teamSettings.tags;
+				// Build tags with system tags first, then custom tags, max 5
+				const tags = buildVideoTags({
+					gender: teamSettings.gender,
+					teamLevel: teamSettings.teamLevel,
+					sport: teamSettings.sport,
+					customTags: teamSettings.customTags || teamSettings.tags // fallback for legacy
+				});
 		const language = teamSettings.language;
 		const licence = teamSettings.licence;
 		const thumbnailPath = typeof teamSettings.thumbnailPath !== 'undefined' ? teamSettings.thumbnailPath : undefined;

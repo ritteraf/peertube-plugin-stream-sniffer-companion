@@ -420,6 +420,16 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 			const pluginVersion = require('./package.json').version;
 			const pluginShortName = 'stream-sniffer-companion';
 			const publicThumbnailBase = `/plugins/${pluginShortName}/${pluginVersion}/static/matchup-thumbnails`; // PeerTube static route
+			// Helper to format tag fields (title case, spaces, matches tag logic)
+			function formatTagField(val) {
+				if (!val || typeof val !== 'string') return val;
+				// Convert underscores to spaces, lowercase, then title case each word
+				return val
+					.toLowerCase()
+					.replace(/_/g, ' ')
+					.replace(/\b\w/g, c => c.toUpperCase());
+			}
+
 			teams = await Promise.all(teams.map(async team => {
 				const mapping = hudlMappings[team.teamId] || {};
 				const cameraId = mapping.cameraId || null;
@@ -473,8 +483,12 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 						return { ...g, matchupThumbnailUrl };
 					});
 				}
+				// Format gender, level, sport fields for API response
 				return {
 					...team,
+					gender: formatTagField(team.gender),
+					level: formatTagField(team.level),
+					sport: formatTagField(team.sport),
 					cameraId,
 					channelId,
 					channelHandle,
