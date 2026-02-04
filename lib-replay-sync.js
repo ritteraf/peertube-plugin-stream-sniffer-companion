@@ -306,7 +306,7 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 				const playlistVideoIds = new Set(playlistVideos.map(v => v.video.id));
 
 				// Find replays not in playlist
-				// Replays: not live, not the permanent live video itself, created this season
+			// Replays: not live, created this season
 				// Use July 1st of season year as cutoff (e.g., July 1 2025 for 2025-2026 season)
 				const seasonStart = new Date(seasonYear, 6, 1); // Month 6 = July (0-indexed)
 				const replays = teamVideos.filter(v => {
@@ -317,7 +317,6 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 					if (isNaN(publishedDate.getTime())) return false;
 					return (
 						!v.isLive &&
-						v.id !== teamData.permanentLiveVideoId &&
 						publishedDate >= seasonStart &&
 						!playlistVideoIds.has(v.id)
 					);
@@ -413,81 +412,6 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 		throw err;
 	}
 }
-
-// Reset all permanent live titles to generic format
-// NOTE: This only resets the PERMANENT LIVE STREAM titles, not the replay videos.
-// PeerTube automatically appends date/time to replay titles (e.g., "Title - 2/2/2026, 3:56:19 PM")
-// TODO: Add companion function to clean up replay video titles by removing date/time suffix
-// Waiting for test results to confirm exact timing and format of PeerTube's replay title behavior
-async function resetPermanentLiveTitles({ storageManager, peertubeHelpers, settingsManager }) {
-	try {
-		console.log('[PLUGIN] Starting permanent live title reset...');
-
-		const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
-		const sniffers = (await storageManager.getData('sniffers')) || {};
-		const { updateVideoMetadata } = require('./lib-peertube-api.js');
-
-		let titlesReset = 0;
-
-		for (const teamId in hudlMappings) {
-			const teamData = hudlMappings[teamId];
-
-			// Skip if no permanent live
-			if (!teamData.permanentLiveVideoId || !teamData.teamName) {
-				continue;
-			}
-
-			// Find OAuth token for the team owner's username
-			let snifferOAuthToken = null;
-			const ownerUsername = teamData.ownerUsername;
-
-			if (!ownerUsername) {
-				console.log(`[PLUGIN] No owner username for team ${teamData.teamName}`);
-				continue;
-			}
-
-			// Find any sniffer authenticated as this user
-			for (const snifferId in sniffers) {
-				if (sniffers[snifferId]?.peertubeUsername === ownerUsername) {
-					snifferOAuthToken = sniffers[snifferId]?.oauthToken;
-					break;
-				}
-			}
-
-			if (!snifferOAuthToken) {
-				console.log(`[PLUGIN] No OAuth token found for user ${ownerUsername} (team ${teamData.teamName})`);
-				continue;
-			}
-
-			try {
-				const genericTitle = `${teamData.teamName} - Wait Live`;
-				await updateVideoMetadata({
-					videoId: teamData.permanentLiveVideoId,
-					updates: { name: genericTitle },
-					oauthToken: snifferOAuthToken,
-					peertubeHelpers,
-					settingsManager
-				});
-
-				titlesReset++;
-				console.log(`[PLUGIN] Reset permanent live title: ${teamData.teamName}`);
-			} catch (err) {
-				console.error(`[PLUGIN] Failed to reset title for ${teamData.teamName}:`, err.message);
-			}
-		}
-
-		console.log(`[PLUGIN] Permanent live title reset complete: ${titlesReset} titles reset`);
-
-		return {
-			titlesReset
-		};
-
-	} catch (err) {
-		console.error('[PLUGIN] Error in resetPermanentLiveTitles:', err);
-		throw err;
-	}
-}
-
 
 // Utility: Normalize gender, team level, and school names for imported YouTube videos
 function normalizeImportedMetadata({ gender, teamLevel, schoolName }) {
@@ -684,6 +608,5 @@ async function backCreateHistoricalPlaylists({ storageManager, peertubeHelpers, 
 
 module.exports = {
 	syncReplaysToPlaylists,
-	resetPermanentLiveTitles,
 	backCreateHistoricalPlaylists
 };

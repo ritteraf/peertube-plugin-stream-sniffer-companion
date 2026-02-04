@@ -42,37 +42,26 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			const cameras = await getCameraAssignments();
 			const removed = cameras[snifferId] ? Object.keys(cameras[snifferId]) : [];
 			const endpoints = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.endpointPath) : [];
-			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
-
-			// Get sniffer's OAuth token for PeerTube API calls
-			const sniffers = (await storageManager.getData('sniffers')) || {};
-			const snifferEntry = sniffers[snifferId];
-			const oauthToken = snifferEntry && snifferEntry.oauthToken;
-
-			// Delete videos from PeerTube
-			const permanentLivesDeleted = [];
-			if (oauthToken && videoIdsToDelete.length > 0) {
-				const { deleteVideo } = require('./lib-peertube-api.js');
-				for (const videoId of videoIdsToDelete) {
-					try {
-						await deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
-						permanentLivesDeleted.push(videoId);
-						peertubeHelpers.logger.info(`[DELETE /cameras] Deleted video ${videoId} from PeerTube`);
-					} catch (err) {
-						peertubeHelpers.logger.error(`[DELETE /cameras] Failed to delete video ${videoId}: ${err.message}`);
-					}
-				}
-			}
 
 			cameras[snifferId] = {};
 			await setCameraAssignments(cameras);
+			
+			// Clean up HUDL team mappings
+			const camerasToDelete = new Set(removed);
+			const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+			for (const teamId in hudlMappings) {
+				if (hudlMappings[teamId].cameraId && camerasToDelete.has(hudlMappings[teamId].cameraId)) {
+					delete hudlMappings[teamId].cameraId;
+				}
+			}
+			await storageManager.storeData('hudl-mappings', hudlMappings);
+			
 			return res.status(200).json({
 				deleted: removed.length,
 				camerasRemoved: removed,
 				endpoints,
 				authenticationPreserved: true,
-				message: 'All cameras deleted',
-				permanentLivesDeleted
+				message: 'All cameras deleted'
 			});
 		} catch (err) {
 			return res.status(500).json({ error: 'PLUGIN_CAMERA_DELETE_FAILED', message: err.message });
@@ -94,41 +83,27 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 		try {
 			const cameras = await getCameraAssignments();
 			let endpoint = null;
-			let permanentLiveVideoId = null;
-			let permanentLiveDeleted = false;
 
 			if (cameras[snifferId] && cameras[snifferId][cameraId]) {
 				endpoint = cameras[snifferId][cameraId].endpointPath;
-				permanentLiveVideoId = cameras[snifferId][cameraId].permanentLiveVideoId;
-
-				// Get sniffer's OAuth token and delete video from PeerTube
-				if (permanentLiveVideoId) {
-					const sniffers = (await storageManager.getData('sniffers')) || {};
-					const snifferEntry = sniffers[snifferId];
-					const oauthToken = snifferEntry && snifferEntry.oauthToken;
-
-					if (oauthToken) {
-						const { deleteVideo } = require('./lib-peertube-api.js');
-						try {
-							await deleteVideo(permanentLiveVideoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
-							permanentLiveDeleted = true;
-							peertubeHelpers.logger.info(`[DELETE /cameras/${cameraId}] Deleted video ${permanentLiveVideoId} from PeerTube`);
-						} catch (err) {
-							peertubeHelpers.logger.error(`[DELETE /cameras/${cameraId}] Failed to delete video ${permanentLiveVideoId}: ${err.message}`);
-						}
-					}
-				}
-
 				delete cameras[snifferId][cameraId];
 				await setCameraAssignments(cameras);
+				
+				// Clean up HUDL team mapping
+				const hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
+				for (const teamId in hudlMappings) {
+					if (hudlMappings[teamId].cameraId === cameraId) {
+						delete hudlMappings[teamId].cameraId;
+					}
+				}
+				await storageManager.storeData('hudl-mappings', hudlMappings);
 			}
+			
 			return res.status(200).json({
 				deleted: true,
 				cameraId,
 				endpoint,
-				message: 'Camera deleted',
-				permanentLiveDeleted,
-				permanentLiveVideoId: permanentLiveDeleted ? permanentLiveVideoId : null
+				message: 'Camera deleted'
 			});
 		} catch (err) {
 			return res.status(500).json({ error: 'PLUGIN_CAMERA_DELETE_FAILED', message: err.message });
@@ -148,32 +123,13 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 		try {
 			const cameras = await getCameraAssignments();
 			const deletedCameras = cameras[snifferId] ? Object.keys(cameras[snifferId]).length : 0;
-			const videoIdsToDelete = cameras[snifferId] ? Object.values(cameras[snifferId]).map(c => c.permanentLiveVideoId).filter(Boolean) : [];
 
 			// Get sniffer's OAuth token and username for clearing configuration
 			if (!storageManager) throw new Error('storageManager not initialized');
 			let sniffers = (await storageManager.getData('sniffers')) || {};
 			const snifferEntry = sniffers[snifferId];
-			const oauthToken = snifferEntry && snifferEntry.oauthToken;
 			const username = snifferEntry && snifferEntry.peertubeUsername;
-
-			// Track deletion counts
-			const permanentLivesDeleted = [];
 			let hudlMappingsCleared = 0;
-
-			// Delete permanent live videos (streaming placeholders, not actual content)
-			if (oauthToken && videoIdsToDelete.length > 0) {
-				const { deleteVideo } = require('./lib-peertube-api.js');
-				for (const videoId of videoIdsToDelete) {
-					try {
-						await deleteVideo(videoId, oauthToken, peertubeHelpers, settingsManager, snifferId, storageManager);
-						permanentLivesDeleted.push(videoId);
-						peertubeHelpers.logger.info(`[POST /reset-all] Deleted video ${videoId} from PeerTube`);
-					} catch (err) {
-						peertubeHelpers.logger.error(`[POST /reset-all] Failed to delete video ${videoId}: ${err.message}`);
-					}
-				}
-			}
 
 			// Clear team ownership and configuration for this user (but don't delete playlists/content)
 			let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
@@ -182,7 +138,6 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					delete teamData.ownerUsername;
 					delete teamData.channelId;
 					delete teamData.channelHandle;
-					delete teamData.permanentLiveVideoId;
 					delete teamData.playlistId;
 					hudlMappingsCleared++;
 				}
@@ -204,10 +159,8 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					oauthTokens: true,
 					encryptedCredentials: true,
 					registryEntry: true,
-					permanentLiveVideos: permanentLivesDeleted.length,
 					hudlTeamMappings: hudlMappingsCleared
 				},
-				permanentLivesDeleted,
 				note: 'Playlists and replay videos were preserved',
 				reauthenticationRequired: true,
 				message: 'All configuration reset'
@@ -373,31 +326,13 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 		}
 		try {
 			const cameras = await getCameraAssignments();
-			// Build sets for new, deleted, and changed cameras
+			// Build sets for new and deleted cameras
 			const newIds = new Set(assignments.map(a => a.cameraId));
-			const hudlPattern = /^rtmp:\/\/.*\/live\//;
-			// Find deleted, renamed, or changed-to-non-HUDL cameras
-			const affectedCameraIds = new Set();
+			// Delete cameras not in new list
 			if (cameras[snifferId]) {
 				for (const camId of Object.keys(cameras[snifferId])) {
-					const oldAssignment = cameras[snifferId][camId];
-					const newAssignment = assignments.find(a => a.cameraId === camId);
-					// Deleted: not in new list
 					if (!newIds.has(camId)) {
-						affectedCameraIds.add(camId);
 						delete cameras[snifferId][camId];
-						continue;
-					}
-					// Renamed: cameraId changed
-					if (newAssignment && oldAssignment.cameraId !== newAssignment.cameraId) {
-						affectedCameraIds.add(camId);
-						continue;
-					}
-					// Changed to non-HUDL: URL pattern no longer matches
-					if (newAssignment && oldAssignment.endpointPath && newAssignment.endpointPath &&
-						hudlPattern.test(oldAssignment.endpointPath) && !hudlPattern.test(newAssignment.endpointPath)) {
-						affectedCameraIds.add(camId);
-						continue;
 					}
 				}
 			} else {
@@ -409,21 +344,6 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			}
 			await setCameraAssignments(cameras);
 
-			// Auto-cleanup HUDL team mappings for affected cameras
-			if (storageManager) {
-				let hudlMappings = (await storageManager.getData('hudl-mappings')) || {};
-				let updated = false;
-				for (const teamId in hudlMappings) {
-					const mapping = hudlMappings[teamId];
-					if (mapping && affectedCameraIds.has(mapping.cameraId)) {
-						mapping.cameraId = '';
-						updated = true;
-					}
-				}
-				if (updated) {
-					await storageManager.storeData('hudl-mappings', hudlMappings);
-				}
-			}
 			return res.status(200).json({
 				success: true,
 				message: 'Configuration saved successfully',

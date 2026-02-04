@@ -30,8 +30,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						cameraId,
 						teamName: session.teamName,
 						opponent: session.opponent,
-						permanentLiveVideoId: session.permanentLiveVideoId,
-						permanentLiveUrl: session.permanentLiveUrl,
+					liveVideoId: session.liveVideoId,
+					videoUrl: session.videoUrl || null,
 						startTime: session.startTime,
 						durationSeconds
 					});
@@ -162,9 +162,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			timestamp: new Date().toISOString()
 		});
 		await storageManager.storeData('recording-log', log);
-		// Use or create a permanent live stream via PeerTube API, using sniffer context
+		// Create live video for matched game using PeerTube API
 		try {
-			const { getOrCreatePermanentLiveStream } = require('./lib-peertube-api.js');
 			const { getMatchupKey, THUMBNAIL_DIR } = require('./lib-matchup-thumbnail.js');
 			const path = require('path');
 			const fs = require('fs');
@@ -512,7 +511,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					snifferId,
 					storageManager,
 					thumbnailPath
-					// No scheduledStartTime - create as regular non-permanent live
+					// No scheduledStartTime - create as regular live video
 				});
 
 				// Store credentials in game object for future use
@@ -607,7 +606,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			});
 			return res.status(500).json({
 				acknowledged: false,
-				message: 'Failed to start permanent live',
+				message: 'Failed to start live stream',
 				error: err.message,
 				stack: err.stack,
 				details: err

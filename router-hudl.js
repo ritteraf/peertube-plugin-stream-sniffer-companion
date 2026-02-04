@@ -272,10 +272,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				downloadEnabled: team.downloadEnabled !== undefined ? team.downloadEnabled : undefined,
 				customTags: Array.isArray(team.customTags) ? team.customTags : undefined,
 				description: team.description !== undefined ? team.description : undefined,
-				// Permanent live video credentials (ONE per team, reused across all seasons)
-				permanentLiveVideoId: hudlMappings[team.teamId]?.permanentLiveVideoId || null,
-				permanentLiveRtmpUrl: hudlMappings[team.teamId]?.permanentLiveRtmpUrl || null,
-				permanentLiveStreamKey: hudlMappings[team.teamId]?.permanentLiveStreamKey || null,
+				// Seasons and schedule data
 				seasons: hudlMappings[team.teamId]?.seasons || {},
 				currentSeasonYear: hudlMappings[team.teamId]?.currentSeasonYear || null
 			};
@@ -391,9 +388,6 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				found: !!foundGame,
 				game: foundGame,
 				channelId: mapping.channelId || null,
-				permanentLiveVideoId: mapping.permanentLiveVideoId || null,
-				permanentLiveRtmpUrl: mapping.permanentLiveRtmpUrl || null,
-				permanentLiveStreamKey: mapping.permanentLiveStreamKey || null,
 				scheduleRefreshQueued: cacheAge > stalenessThreshold,
 				message: foundGame ? 'Game matched' : 'No matching game found after refresh'
 			});

@@ -319,12 +319,6 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
       routerError.setStorageManager(storageManager);
     }
   } catch (e) { }
-  try {
-    const permLiveMgr = require('./lib-permanent-live-manager.js');
-    if (permLiveMgr.setPeertubeHelpers) {
-      permLiveMgr.setPeertubeHelpers(peertubeHelpers);
-    }
-  } catch (e) { }
 
 
   // Use getRouter to mount all plugin routes

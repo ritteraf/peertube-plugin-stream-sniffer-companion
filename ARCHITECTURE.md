@@ -169,7 +169,7 @@ This plugin acts as a companion to a physical camera sniffer system that detects
 ┌─────────────────────────────────────────────────────────────────┐
 │ 6. STREAM CREATION                                              │
 ├─────────────────────────────────────────────────────────────────┤
-│ - Get/create permanent live video on PeerTube                  │
+│ - Use pre-created scheduled live video credentials             │
 │ - Return RTMP credentials to sniffer                            │
 │ - Sniffer restreams HUDL camera → PeerTube                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -187,15 +187,19 @@ Maps teams to cameras and PeerTube channels:
     "cameraId": "camera-tactical",
     "channelId": 42,
     "channelHandle": "boys-basketball@peertube.example.com",
-    "permanentLiveVideoId": "video-uuid",
-    "permanentLiveRtmpUrl": "rtmp://...",
-    "permanentLiveStreamKey": "stream-key"
+    "seasons": {
+      "2024-2025": {
+        "playlistId": "playlist-uuid",
+        "createdAt": "2024-09-01T00:00:00Z"
+      }
+    },
+    "currentSeasonYear": "2024-2025"
   }
 }
 ```
 
 ### hudl-schedules
-Cached game schedules from HUDL API:
+Cached game schedules from HUDL API with scheduled live video credentials:
 ```javascript
 {
   "team-12345": {
@@ -213,7 +217,11 @@ Cached game schedules from HUDL API:
           "schoolId": "school-456"
         },
         "scheduleEntryOutcome": 0,  // 0=not played, 1=WIN, 2=LOSS
-        "broadcastStatus": "Upcoming"  // "Archived", "Upcoming", or null
+        "broadcastStatus": "Upcoming",  // "Archived", "Upcoming", or null
+        "liveVideoId": "video-uuid",  // Pre-created scheduled live video
+        "rtmpUrl": "rtmp://...",
+        "streamKey": "stream-key",
+        "liveCreatedAt": "2025-12-01T00:00:00Z"
       }
     ],
     "lastScraped": "2025-12-10T10:00:00Z"
