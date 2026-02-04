@@ -415,6 +415,10 @@ async function syncReplaysToPlaylists({ storageManager, peertubeHelpers, setting
 }
 
 // Reset all permanent live titles to generic format
+// NOTE: This only resets the PERMANENT LIVE STREAM titles, not the replay videos.
+// PeerTube automatically appends date/time to replay titles (e.g., "Title - 2/2/2026, 3:56:19 PM")
+// TODO: Add companion function to clean up replay video titles by removing date/time suffix
+// Waiting for test results to confirm exact timing and format of PeerTube's replay title behavior
 async function resetPermanentLiveTitles({ storageManager, peertubeHelpers, settingsManager }) {
 	try {
 		console.log('[PLUGIN] Starting permanent live title reset...');

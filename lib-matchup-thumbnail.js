@@ -166,7 +166,7 @@ async function generateMatchupThumbnail(homeLogoUrl, awayLogoUrl, homeId, awayId
       { input: homeLogoResized, left: leftX, top: centerY },
       { input: awayLogoResized, left: rightX, top: centerY }
     ])
-    .jpeg()
+    .jpeg({ quality: 50 })
     .toBuffer();
 
   // 6. Add VS PNG overlay (centered)
@@ -184,7 +184,7 @@ async function generateMatchupThumbnail(homeLogoUrl, awayLogoUrl, homeId, awayId
         top: vsTop
       }
     ])
-    .jpeg()
+    .jpeg({ quality: 50 })
     .toBuffer();
 
   // 7. Save to cache

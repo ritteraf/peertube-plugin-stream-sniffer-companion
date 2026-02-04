@@ -329,10 +329,12 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 								const possiblePath = path.join(THUMBNAIL_DIR, matchupKey);
 								if (fs.existsSync(possiblePath)) {
 									thumbnailPath = possiblePath;
-									console.log('[PLUGIN HUDL] ✓ Matchup thumbnail found:', possiblePath);
+									console.log('[PLUGIN HUDL] ✓ Matchup thumbnail found and will be applied:', possiblePath);
 								} else {
-									console.log('[PLUGIN HUDL] ✗ Matchup thumbnail not found:', possiblePath);
+									console.log('[PLUGIN HUDL] ✗ Matchup thumbnail not cached (will use default):', possiblePath);
 								}
+							} else {
+								console.log('[PLUGIN HUDL] Cannot determine matchup thumbnail - missing team or opponent ID');
 							}
 							break;
 						}
@@ -411,7 +413,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				generatedTitle = generateGameTitle(matchedGame, teamData, schoolName);
 			}
 
-			// MATCHED GAME: Use team's permanent live video
+			// MATCHED GAME: Use pre-created scheduled live video
 			if (matchedGame && matchedTeamId) {
 				const teamMapping = hudlMappings[matchedTeamId];
 				if (!teamMapping) {
@@ -423,84 +425,133 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					});
 				}
 
-				// Prepare team settings for permanent live stream
-				const { parseTeamTags } = require('./lib-peertube-api.js');
-				const schedule = schedules[matchedTeamId];
-				const teamTags = parseTeamTags(schedule?.gender, schedule?.level, schedule?.sport);
+				// Check if live video was pre-created for this game
+				if (matchedGame.liveVideoId && matchedGame.rtmpUrl && matchedGame.streamKey) {
+					console.log(`[PLUGIN HUDL] ✓ Using pre-created scheduled live video for game ${matchedGame.id}:`, {
+						videoId: matchedGame.liveVideoId,
+						opponent: matchedGame.opponentDetails?.name,
+						title: matchedGame.generatedTitle
+					});
 
-			// Add team name tag (REQUIRED for playlist sync filtering when teams share channels)
-			const teamNameTag = teamMapping.teamName;
-			if (teamNameTag && teamNameTag.length >= 2 && teamNameTag.length <= 30) {
-				teamTags.unshift(teamNameTag); // Add at beginning to ensure it's included
-			}
+					const schedule = schedules[matchedTeamId];
+					const seasonYear = schedule?.seasonYear;
 
+					// Store active recording session for tracking
+					if (!global.__ACTIVE_RECORDING_SESSIONS__[snifferId]) {
+						global.__ACTIVE_RECORDING_SESSIONS__[snifferId] = {};
+					}
+					global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId] = {
+						liveVideoId: matchedGame.liveVideoId,
+						teamId: matchedTeamId,
+						teamName: teamMapping.teamName,
+						opponent: matchedGame.opponentDetails?.name || null,
+						playlistId: teamMapping.seasons?.[seasonYear]?.playlistId || null,
+						seasonYear,
+						startTime: event.startTime || new Date().toISOString(),
+						gameId: matchedGame.id
+					};
 
-				// Add custom tags if available
-				if (Array.isArray(teamMapping.customTags)) {
-					teamTags.push(...teamMapping.customTags);
+					return res.status(200).json({
+						acknowledged: true,
+						message: 'Using pre-created scheduled live video',
+						streamId: matchedGame.liveVideoId,
+						liveStream: {
+							videoId: matchedGame.liveVideoId,
+							rtmpUrl: matchedGame.rtmpUrl,
+							streamKey: matchedGame.streamKey,
+							isNew: false,
+							videoTitle: matchedGame.generatedTitle
+						},
+						matchInfo: {
+							opponent: matchedGame.opponentDetails?.name,
+							gameTime: matchedGame.timeUtc || matchedGame.date,
+							teamName: teamMapping.teamName
+						}
+					});
 				}
 
-				// Validate and limit tags: max 5 tags, each 2-30 characters
-				const validTags = teamTags
+				// Fallback: No pre-created video exists - create one on the fly
+				console.warn(`[PLUGIN HUDL] No pre-created live video found for game ${matchedGame.id}, creating on-the-fly`);
+				
+				const { createPeerTubeLiveVideo } = require('./lib-peertube-api.js');
+				const { buildVideoTags } = require('./lib-peertube-api.js');
+				const schedule = schedules[matchedTeamId];
+				
+				const tags = buildVideoTags({
+					gender: schedule?.gender,
+					teamLevel: schedule?.teamLevel,
+					sport: schedule?.sport,
+					customTags: teamMapping.customTags || []
+				});
+
+				// Add team name tag
+				const teamNameTag = teamMapping.teamName;
+				if (teamNameTag && teamNameTag.length >= 2 && teamNameTag.length <= 30) {
+					tags.unshift(teamNameTag);
+				}
+
+				// Validate and limit tags
+				const validTags = tags
 					.filter(tag => typeof tag === 'string' && tag.length >= 2 && tag.length <= 30)
 					.slice(0, 5);
 
-				const teamSettings = {
-					teamId: matchedTeamId,
-					teamName: teamMapping.teamName,
+				const liveVideo = await createPeerTubeLiveVideo({
 					channelId: teamMapping.channelId,
-					ownerUsername: teamMapping.ownerUsername,
-					gender: schedule?.gender,
-					teamLevel: schedule?.level,
-					sport: schedule?.sport,
-					streamTitle: generatedTitle,
-					streamDescription: teamMapping.description || `${teamMapping.teamName} game`,
+					name: generatedTitle,
+					description: teamMapping.description || `${teamMapping.teamName} game`,
 					category: teamMapping.category !== undefined ? teamMapping.category : cameraAssignment.defaultStreamCategory,
 					privacy: teamMapping.privacy !== undefined ? teamMapping.privacy : cameraAssignment.privacyId,
+					tags: validTags,
+					language: 'en',
+					licence: 1,
 					commentsEnabled: teamMapping.commentsEnabled !== undefined ? teamMapping.commentsEnabled : true,
 					downloadEnabled: teamMapping.downloadEnabled !== undefined ? teamMapping.downloadEnabled : true,
-					tags: validTags,
-					language: 'en', // Default to English
-					licence: 1, // Default to Attribution (CC BY)
-					thumbnailPath,
-					permanentLiveVideoId: teamMapping.permanentLiveVideoId,
-					permanentLiveRtmpUrl: teamMapping.permanentLiveRtmpUrl,
-					permanentLiveStreamKey: teamMapping.permanentLiveStreamKey,
-					seasonYear: schedule?.seasonYear,
-					seasons: teamMapping.seasons || {}
-				};
+					oauthToken: snifferOAuthToken,
+					peertubeHelpers,
+					settingsManager,
+					snifferId,
+					storageManager,
+					thumbnailPath
+					// No scheduledStartTime - create as regular non-permanent live
+				});
 
-			console.log(`[PLUGIN HUDL] Team settings for live stream:`, {
-				teamId: matchedTeamId,
-				teamName: teamSettings.teamName,
-				seasonYear: teamSettings.seasonYear,
-				hasSchedule: !!schedule,
-				scheduleSeasonYear: schedule?.seasonYear
-			});
+				// Store credentials in game object for future use
+				matchedGame.liveVideoId = liveVideo.id;
+				matchedGame.rtmpUrl = liveVideo.rtmpUrl;
+				matchedGame.streamKey = liveVideo.streamKey;
+				matchedGame.liveCreatedAt = new Date().toISOString();
+				await storageManager.storeData('hudl-schedules', schedules);
 
-				const liveStream = await getOrCreatePermanentLiveStream(snifferId, matchedTeamId, teamSettings, snifferOAuthToken, peertubeHelpers, settingsManager, storageManager);
+				const seasonYear = schedule?.seasonYear;
+				
 			// Store active recording session for tracking
 			if (!global.__ACTIVE_RECORDING_SESSIONS__[snifferId]) {
 				global.__ACTIVE_RECORDING_SESSIONS__[snifferId] = {};
 			}
 			global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId] = {
-				permanentLiveVideoId: liveStream.videoId,
+				liveVideoId: liveVideo.id,
 				teamId: matchedTeamId,
-				teamName: teamSettings.teamName,
+				teamName: teamMapping.teamName,
 				opponent: matchedGame.opponentDetails?.name || null,
-				playlistId: teamSettings.seasons?.[teamSettings.seasonYear]?.playlistId || null,
-				seasonYear: teamSettings.seasonYear,
+				playlistId: teamMapping.seasons?.[seasonYear]?.playlistId || null,
+				seasonYear: seasonYear,
 				startTime: event.startTime || new Date().toISOString(),
-				permanentLiveUrl: liveStream.permanentLiveUrl || null
+				gameId: matchedGame.id
 			};
 				return res.status(200).json({
 					acknowledged: true,
-					message: 'Using HUDL live video (matched game)',
-					streamId: liveStream.videoId,
-					liveStream,
-					isDuplicate: !liveStream.isNew,
+					message: 'Created live video on-the-fly (matched game, no pre-created video)',
+					streamId: liveVideo.id,
+					liveStream: {
+						videoId: liveVideo.id,
+						rtmpUrl: liveVideo.rtmpUrl,
+						streamKey: liveVideo.streamKey,
+						isNew: true,
+						videoTitle: generatedTitle
+					},
+					isDuplicate: false,
 					hudl: true,
-					permanent: true,
+					permanent: false,
 					thumbnailUsed: thumbnailPath || null,
 					matchedGame: matchedGame,
 					matchedTeamId: matchedTeamId
@@ -619,12 +670,12 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 		});
 		await storageManager.storeData('recording-log', log);
 
-		// Clean up session tracking (title reset happens during auto-refresh)
+		// Clean up session tracking
 		const session = global.__ACTIVE_RECORDING_SESSIONS__?.[snifferId]?.[event.cameraId];
-		if (session && session.permanentLiveVideoId) {
+		if (session && session.liveVideoId) {
 			// Remove session from tracking
 			delete global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId];
-			console.log('[PLUGIN] Cleaned up recording session:', { snifferId, cameraId: event.cameraId });
+			console.log('[PLUGIN] Cleaned up recording session:', { snifferId, cameraId: event.cameraId, videoId: session.liveVideoId });
 		}
 
 		console.log('[PLUGIN] Recording stopped successfully:', {

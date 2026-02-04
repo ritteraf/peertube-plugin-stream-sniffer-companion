@@ -236,7 +236,7 @@ function buildVideoTags({ gender, teamLevel, sport, customTags }) {
 // Note: PeerTube licence IDs: 1=Attribution, 2=Attribution-ShareAlike, 3=Attribution-NoDerivs,
 //       4=Attribution-NonCommercial, 5=Attribution-NonCommercial-ShareAlike,
 //       6=Attribution-NonCommercial-NoDerivs, 7=Public Domain Dedication
-async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, tags, language, licence, commentsEnabled, downloadEnabled, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null, thumbnailPath = null }) {
+async function createPeerTubeLiveVideo({ channelId, name, description, category, privacy, tags, language, licence, commentsEnabled, downloadEnabled, oauthToken, peertubeHelpers, settingsManager, snifferId = null, storageManager = null, thumbnailPath = null, scheduledStartTime = null }) {
 	const fs = require('fs');
 	const FormData = require('form-data');
 	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
@@ -245,26 +245,46 @@ async function createPeerTubeLiveVideo({ channelId, name, description, category,
 	// Required fields
 	form.append('channelId', channelId);
 	form.append('name', name);
-	form.append('permanentLive', 'true');
+	
+	// If scheduledStartTime is provided, create a scheduled live (not permanent)
+	// Otherwise, create a permanent live (old behavior for backward compatibility)
+	if (scheduledStartTime) {
+		// Scheduled live video - NOT permanent
+		form.append('permanentLive', 'false');
+		
+		// Set when the live stream is scheduled to air (array of schedule objects)
+		form.append('schedules[0][startAt]', scheduledStartTime);
+		
+		// Video is visible immediately with configured privacy so users can see it in upcoming schedule
+		if (privacy !== undefined) form.append('privacy', String(privacy));
+	} else {
+		// Permanent live video (legacy behavior)
+		form.append('permanentLive', 'true');
+	}
+	
+	// IMPORTANT: PeerTube automatically appends a date/time suffix to replay video titles
+	// when saveReplay is enabled (e.g., "Title - 2/2/2026, 3:56:19 PM")
+	// This is PeerTube's built-in behavior and cannot be disabled via API.
+	// See lib-replay-sync.js for cleanup logic (TODO: implement replay title cleanup)
 	form.append('saveReplay', 'true');
 
 	// Set replay privacy to match the live video privacy (or default to public if not specified)
 	const replayPrivacy = privacy !== undefined ? privacy : 1; // 1 = Public
-	form.append('replaySettings[privacy]', replayPrivacy);
+	form.append('replaySettings[privacy]', String(replayPrivacy));
 
 	// Optional metadata fields
 	if (description) form.append('description', description);
-	if (category !== undefined) form.append('category', category);
-	if (privacy !== undefined) form.append('privacy', privacy);
+	if (category !== undefined) form.append('category', String(category));
+	if (!scheduledStartTime && privacy !== undefined) form.append('privacy', String(privacy)); // Only set if not scheduled
 	if (tags && Array.isArray(tags) && tags.length > 0) {
 		tags.forEach(tag => form.append('tags[]', tag));
 	}
 	if (language) form.append('language', language);
-	if (licence !== undefined) form.append('licence', licence);
-	if (commentsEnabled !== undefined) form.append('commentsEnabled', commentsEnabled);
-	if (downloadEnabled !== undefined) form.append('downloadEnabled', downloadEnabled);
+	if (licence !== undefined) form.append('licence', String(licence));
+	if (commentsEnabled !== undefined) form.append('commentsEnabled', String(commentsEnabled));
+	if (downloadEnabled !== undefined) form.append('downloadEnabled', String(downloadEnabled));
 
-	// Add thumbnail if provided and exists
+	// Add thumbnail if provided
 	if (thumbnailPath && typeof thumbnailPath === 'string' && thumbnailPath.length > 0) {
 		if (fs.existsSync(thumbnailPath)) {
 			form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
@@ -406,6 +426,8 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 					teamSettings.language ||
 					teamSettings.licence !== undefined;
 
+				// ALWAYS update thumbnail if available, even when no other metadata changes
+				// This ensures matchup thumbnails are applied each time a stream starts
 				if (hasMetadata || hasThumbnail) {
 					const fs = require('fs');
 					const FormData = require('form-data');
@@ -426,9 +448,11 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 					// Add thumbnail file if provided and exists
 					if (hasThumbnail && fs.existsSync(thumbnailPath)) {
 						form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
-						console.log(`[PLUGIN] Including thumbnail in video update: ${thumbnailPath}`);
+						console.log(`[PLUGIN] ✓ Applying matchup thumbnail to permanent live video ${teamSettings.permanentLiveVideoId}: ${thumbnailPath}`);
 					} else if (hasThumbnail) {
-						console.warn(`[PLUGIN] Thumbnail file not found at path: ${thumbnailPath}`);
+						console.warn(`[PLUGIN] ✗ Matchup thumbnail not found at path: ${thumbnailPath}`);
+					} else {
+						console.log(`[PLUGIN] No thumbnail path provided for video ${teamSettings.permanentLiveVideoId}`);
 					}
 
 					const updateRes = await fetch(`${baseUrl}/api/v1/videos/${teamSettings.permanentLiveVideoId}`, {
@@ -444,7 +468,7 @@ async function getOrCreatePermanentLiveStream(snifferId, teamId, teamSettings, p
 						const errorText = await updateRes.text();
 						console.warn(`[PLUGIN] Failed to update video ${teamSettings.permanentLiveVideoId}: ${updateRes.status} ${errorText}`);
 					} else {
-						console.log(`[PLUGIN] Successfully updated video ${teamSettings.permanentLiveVideoId}`);
+						console.log(`[PLUGIN] ✓ Successfully updated permanent live video ${teamSettings.permanentLiveVideoId}` + (hasThumbnail ? ' with matchup thumbnail' : ''));
 					}
 				}
 				// Check if playlist exists for this season
@@ -745,18 +769,95 @@ async function updateVideoMetadata({ videoId, updates, oauthToken, peertubeHelpe
 	return true;
 }
 
+/**
+ * Apply a thumbnail to an existing video
+ * Separate from creation to avoid nginx 413 errors with large multipart requests
+ * @param {Object} params
+ * @param {string} params.videoId - PeerTube video ID
+ * @param {string} params.thumbnailPath - Absolute path to thumbnail file
+ * @param {string} params.oauthToken - PeerTube OAuth token
+ * @param {Object} params.peertubeHelpers - PeerTube helpers object
+ * @param {Object} params.settingsManager - Settings manager
+ * @returns {Promise<boolean>}
+ */
+async function applyThumbnailToVideo({ videoId, thumbnailPath, oauthToken, peertubeHelpers, settingsManager }) {
+	const FormData = require('form-data');
+	const fs = require('fs');
+	const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+
+	if (!thumbnailPath || !fs.existsSync(thumbnailPath)) {
+		console.warn(`[PLUGIN] Thumbnail file not found at path: ${thumbnailPath}`);
+		return false;
+	}
+
+	// Fetch current video data to get existing metadata
+	const videoRes = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+		headers: { 'Authorization': `Bearer ${oauthToken}` }
+	});
+	
+	if (!videoRes.ok) {
+		console.error(`[PLUGIN] Failed to fetch video ${videoId}: ${videoRes.status}`);
+		return false;
+	}
+	
+	const videoData = await videoRes.json();
+
+	// Build complete FormData with all current metadata
+	const form = new FormData();
+	
+	// Required metadata fields (send current values)
+	form.append('name', videoData.name);
+	form.append('channelId', String(videoData.channel.id));
+	form.append('privacy', String(videoData.privacy.id));
+	form.append('category', String(videoData.category?.id || 1));
+	
+	// Optional metadata fields
+	if (videoData.description) form.append('description', videoData.description);
+	if (videoData.language?.id) form.append('language', videoData.language.id);
+	if (videoData.licence?.id) form.append('licence', String(videoData.licence.id));
+	form.append('downloadEnabled', videoData.downloadEnabled ? 'true' : 'false');
+	form.append('commentsEnabled', videoData.commentsEnabled ? 'true' : 'false');
+	
+	// Tags (if present)
+	if (videoData.tags && videoData.tags.length > 0) {
+		videoData.tags.forEach(tag => form.append('tags[]', tag));
+	}
+	
+	// Finally, add the thumbnail file
+	form.append('thumbnailfile', fs.createReadStream(thumbnailPath));
+
+	const res = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+		method: 'PUT',
+		headers: {
+			'Authorization': `Bearer ${oauthToken}`,
+			...form.getHeaders()
+		},
+		body: form
+	});
+
+	if (!res.ok) {
+		const errorText = await res.text();
+		console.error(`[PLUGIN] Failed to apply thumbnail to video ${videoId}: ${res.status} ${errorText}`);
+		return false;
+	}
+
+	console.log(`[PLUGIN] ✓ Thumbnail applied to video ${videoId}: ${thumbnailPath}`);
+	return true;
+}
+
 module.exports = {
 	getPeerTubeToken,
 	getPeerTubeChannels,
 	getPeerTubeCategories,
 	getPeerTubePrivacyOptions,
 
-	getOrCreatePermanentLiveStream,
 	createPeerTubeLiveVideo,
 	parseTeamTags,
+	buildVideoTags,
 	createPlaylist,
 	addVideoToPlaylist,
 	updateVideoMetadata,
+	applyThumbnailToVideo,
 	checkVideoExists,
 	getVideoTitle,
 	deleteVideo,

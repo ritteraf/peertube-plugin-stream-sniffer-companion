@@ -49,7 +49,7 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
   }
 
   const hudlLimiter = require('./lib-hudl-rate-limiter.js');
-  const { syncReplaysToPlaylists, resetPermanentLiveTitles } = require('./lib-replay-sync.js');
+  const { syncReplaysToPlaylists } = require('./lib-replay-sync.js');
   
   async function autoRefreshHudlSchedules() {
     // Check for global refresh lock (set by backfill or other long-running refresh)
@@ -127,18 +127,18 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
       console.log(`[PLUGIN HUDL auto-refresh] Total HUDL API requests made in this run: ${requestCount}`);
       console.log(`[PLUGIN HUDL auto-refresh] Matchups parsed: ${matchupCount}`);
       
+      // Generate thumbnails first (synchronously) - needed for scheduled live creation
+      const { generateThumbnailsFromSchedules } = require('./lib-thumbnail-generator.js');
+      const thumbnailResult = await generateThumbnailsFromSchedules(schedules);
+      console.log(`[PLUGIN HUDL auto-refresh] Images generated: ${thumbnailResult.generated}, images already existed: ${thumbnailResult.cached}`);
+      
+      // Create scheduled live videos for upcoming home games
+      const { createScheduledLivesForGames } = require('./lib-scheduled-lives.js');
+      const scheduledLiveResult = await createScheduledLivesForGames({ storageManager, peertubeHelpers, settingsManager });
+      console.log(`[PLUGIN HUDL auto-refresh] Scheduled lives: ${scheduledLiveResult.created} created, ${scheduledLiveResult.existing} already exist, ${scheduledLiveResult.skipped} skipped`);
+      
       // Sync replays to playlists after schedule refresh
       await syncReplaysToPlaylists({ storageManager, peertubeHelpers, settingsManager });
-      
-      // Reset permanent live titles to generic format
-      await resetPermanentLiveTitles({ storageManager, peertubeHelpers, settingsManager });
-      
-      // After storing schedules, trigger image generation in background
-      setImmediate(async () => {
-        const { generateThumbnailsFromSchedules } = require('./lib-thumbnail-generator.js');
-        const result = await generateThumbnailsFromSchedules(schedules);
-        console.log(`[PLUGIN HUDL auto-refresh] Images generated: ${result.generated}, images already existed: ${result.cached}`);
-      });
     } catch (err) {
       console.error('[PLUGIN HUDL auto-refresh] Error during auto-refresh:', err);
     }
@@ -370,6 +370,12 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
 }
 
 async function unregister() {
+  // Clear any pending auto-refresh timeout to prevent multiple refresh loops
+  if (global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__) {
+    clearTimeout(global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__);
+    global.__HUDL_AUTO_REFRESH_TIMEOUT_ID__ = null;
+    console.log('[PLUGIN] Cleared HUDL auto-refresh timeout on plugin unregister');
+  }
   return
 }
 
