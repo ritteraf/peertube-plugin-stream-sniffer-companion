@@ -143,9 +143,7 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 				const currentSeasonPlaylist = mapping?.seasons?.[currentSeasonYear];
 
 				// Construct URLs if IDs exist and baseUrl is available
-				const permanentLiveVideoId = mapping?.permanentLiveVideoId || null;
 				const playlistId = currentSeasonPlaylist?.playlistId || null;
-				const permanentLiveUrl = (baseUrl && permanentLiveVideoId) ? `${baseUrl}/w/${permanentLiveVideoId}` : null;
 				const playlistUrl = (baseUrl && playlistId) ? `${baseUrl}/w/p/${playlistId}` : null;
 
 				// Regenerate playlist name if missing (for playlists created before displayName fix)
@@ -154,6 +152,28 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					const nextYear = parseInt(currentSeasonYear) + 1;
 					playlistName = `${schedule.teamName} ${currentSeasonYear}-${nextYear}`;
 				}
+
+				// Get upcoming scheduled games (home games only, not in the past, not played)
+				const now = Date.now();
+				const upcomingGames = (schedule.games || [])
+					.filter(game => {
+						const gameTime = new Date(game.timeUtc || game.date).getTime();
+						return game.scheduleEntryLocation === 1 && // HOME games only
+							   gameTime >= now && // Future games only
+							   (!game.scheduleEntryOutcome || game.scheduleEntryOutcome === 0); // Not played
+					})
+					.map(game => ({
+						gameId: game.id,
+						opponent: game.opponentDetails?.name || 'Unknown',
+						opponentLogoUrl: game.opponentDetails?.logoURL || null,
+						gameTime: game.timeUtc || game.date,
+						title: game.generatedTitle || `${schedule.teamName} vs ${game.opponentDetails?.name || 'Opponent'}`,
+						videoId: game.liveVideoId || null,
+						videoUrl: (baseUrl && game.liveVideoId) ? `${baseUrl}/w/${game.liveVideoId}` : null,
+						isScheduledLiveCreated: !!game.liveVideoId
+					}))
+					.sort((a, b) => new Date(a.gameTime).getTime() - new Date(b.gameTime).getTime())
+					.slice(0, 5); // Limit to next 5 games
 
 				return {
 					teamId: schedule.teamId,
@@ -174,13 +194,10 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					downloadEnabled: mapping && mapping.downloadEnabled !== undefined ? mapping.downloadEnabled : null,
 					customTags: mapping && Array.isArray(mapping.customTags) ? mapping.customTags : null,
 					description: mapping && mapping.description !== undefined ? mapping.description : null,
-					permanentLiveVideoId,
-					permanentLiveUrl,
 					playlistId,
 					playlistUrl,
 					playlistName,
-					rtmpUrl: null,
-					streamKey: null,
+					upcomingGames,
 					lastScraped: schedule.lastScraped || null
 				};
 			});
