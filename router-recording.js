@@ -480,7 +480,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					gender: schedule?.gender,
 					teamLevel: schedule?.teamLevel,
 					sport: schedule?.sport,
-					customTags: teamMapping.customTags || []
+					customTags: teamMapping.customTags || [],
+					teamName: schedule?.name
 				});
 
 				// Add team name tag

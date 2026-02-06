@@ -133,7 +133,8 @@ async function createScheduledLivesForGames({ storageManager, peertubeHelpers, s
 					gender: teamData.gender,
 					teamLevel: teamData.teamLevel,
 					sport: teamData.sport,
-					customTags: teamMapping.customTags || []
+					customTags: teamMapping.customTags || [],
+					teamName: teamData.name
 				});
 
 				// Add team name tag

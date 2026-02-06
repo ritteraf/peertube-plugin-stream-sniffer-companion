@@ -514,12 +514,18 @@ module.exports = function createHudlRouter({ storageManager, settingsManager, pe
 					const hudlTeam = hudlTeams.find(t => t.id === team.teamId);
 					if (hudlTeam && hudlTeam.teamLevel) level = hudlTeam.teamLevel;
 				}
+				
+				// Generate filterTags array (exact tags that will be auto-applied to videos)
+				const { parseTeamTags } = require('./lib-peertube-api.js');
+				const filterTags = parseTeamTags(team.gender, team.level, team.sport, team.name);
+				
 				// Format gender, level, sport fields for API response
 				return {
 					...team,
 					gender: formatTagField(team.gender),
 					level: formatTagField(level),
 					sport: formatTagField(team.sport),
+					filterTags,
 					cameraId,
 					channelId,
 					channelHandle,

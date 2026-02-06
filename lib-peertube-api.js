@@ -198,7 +198,7 @@ async function getVideoTitle(videoId, oauthToken, peertubeHelpers, settingsManag
 // Helper: Parse tags from HUDL team data
 // gender: "MENS", "WOMENS", "COED", or null
 // teamLevel: "VARSITY", "JUNIOR_VARSITY", "FRESHMAN", "OTHER", or null
-function parseTeamTags(gender, teamLevel, sport) {
+function parseTeamTags(gender, teamLevel, sport, teamName) {
 	const tags = [];
 
 	// Gender tags: use HUDL values, but capitalize for tags
@@ -210,7 +210,15 @@ function parseTeamTags(gender, teamLevel, sport) {
 	if (teamLevel === 'VARSITY') tags.push('Varsity');
 	else if (teamLevel === 'JUNIOR_VARSITY') tags.push('Junior Varsity');
 	else if (teamLevel === 'FRESHMAN') tags.push('Freshman');
-	// Skip "OTHER" - team name usually contains level
+	else if (teamLevel === 'OTHER') {
+		// Parse team name for level designation
+		const parsedLevel = parseLevelFromTeamName(teamName);
+		if (parsedLevel) {
+			tags.push(parsedLevel);
+		} else {
+			tags.push('Other');
+		}
+	}
 
 	// Add sport as a tag (capitalize first letter, rest lowercase)
 	if (sport && typeof sport === 'string') {
@@ -221,9 +229,35 @@ function parseTeamTags(gender, teamLevel, sport) {
 	return tags;
 }
 
+// Helper: Parse level from team name when teamLevel is OTHER
+function parseLevelFromTeamName(teamName) {
+	if (!teamName || typeof teamName !== 'string') return null;
+	
+	const name = teamName.trim();
+	
+	// Check for various level indicators
+	if (/\bJH\b|\bJ\.H\.|Junior High/i.test(name)) {
+		return 'Junior High';
+	}
+	if (/\bMS\b|\bM\.S\.|Middle School/i.test(name)) {
+		return 'Middle School';
+	}
+	if (/\b8th Grade\b|Eighth Grade/i.test(name)) {
+		return '8th Grade';
+	}
+	if (/\b7th Grade\b|Seventh Grade/i.test(name)) {
+		return '7th Grade';
+	}
+	if (/\b6th Grade\b|Sixth Grade/i.test(name)) {
+		return '6th Grade';
+	}
+	
+	return null; // No level found, will use 'Other'
+}
+
 // Helper: Combine system tags and user tags, enforcing PeerTube's 5-tag limit (system tags first)
-function buildVideoTags({ gender, teamLevel, sport, customTags }) {
-	const systemTags = parseTeamTags(gender, teamLevel, sport);
+function buildVideoTags({ gender, teamLevel, sport, customTags, teamName }) {
+	const systemTags = parseTeamTags(gender, teamLevel, sport, teamName);
 	let tags = [...systemTags];
 	if (Array.isArray(customTags) && customTags.length > 0) {
 		// Only add as many custom tags as will fit (max 5 total)

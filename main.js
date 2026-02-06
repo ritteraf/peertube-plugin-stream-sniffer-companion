@@ -96,16 +96,43 @@ async function register({ getRouter, registerSetting, settingsManager, storageMa
           games = await hudlLimiter.enqueue(() => { requestCount++; return hudl.fetchTeamSchedule(team.id, 'auto-refresh'); });
           matchupCount += games.length;
 
-          // Add generated title to each game
+          // Merge HUDL data with existing plugin data
           const teamData = {
             sport: team.sport,
             gender: team.gender,
             teamLevel: team.teamLevel
           };
-          games = games.map(game => ({
-            ...game,
-            generatedTitle: generateGameTitle(game, teamData, school.fullName)
-          }));
+          
+          const existingTeamSchedule = schedules[team.id];
+          games = games.map(game => {
+            // Add generated title from HUDL data
+            const gameWithTitle = {
+              ...game,
+              generatedTitle: generateGameTitle(game, teamData, school.fullName)
+            };
+
+            // If this game exists in our storage, preserve plugin-specific fields
+            if (existingTeamSchedule && existingTeamSchedule.games) {
+              const existingGame = existingTeamSchedule.games.find(g => g.id === game.id);
+              if (existingGame) {
+                // Merge: HUDL data (from API) + plugin data (from storage)
+                return {
+                  ...gameWithTitle,  // Fresh HUDL metadata (opponent, time, location, outcome, etc.)
+                  // Preserve plugin-added fields if they exist
+                  ...(existingGame.liveVideoId && {
+                    liveVideoId: existingGame.liveVideoId,
+                    rtmpUrl: existingGame.rtmpUrl,
+                    streamKey: existingGame.streamKey,
+                    scheduledLiveCreatedAt: existingGame.scheduledLiveCreatedAt
+                  }),
+                  ...(existingGame.liveCreatedAt && { liveCreatedAt: existingGame.liveCreatedAt })
+                };
+              }
+            }
+            
+            // New game, no existing data to merge
+            return gameWithTitle;
+          });
         } catch (e) { error = e.message; }
         schedules[team.id] = {
           teamId: team.id,
