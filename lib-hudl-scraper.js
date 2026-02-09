@@ -116,6 +116,7 @@ async function fetchTeamSchedule(teamId, snifferId) {
 			scheduleEntryPublicSummaries(input: $input) {
 				items {
 					id
+					scheduleEntryId
 					timeUtc
 					opponentDetails {
 						name
@@ -146,12 +147,70 @@ async function fetchTeamSchedule(teamId, snifferId) {
 	return data.scheduleEntryPublicSummaries.items;
 }
 
+// Fetch broadcast details by scheduleEntryId (for custom titles and metadata)
+async function fetchBroadcast(scheduleEntryId, snifferId) {
+	if (!scheduleEntryId) return null;
+	const query = `
+		query Web_Fan_GetBroadcastByScheduleEntryId_r1($scheduleEntryId: ID!) {
+			getBroadcastByScheduleEntryId(scheduleEntryId: $scheduleEntryId) {
+				accessPassIds
+				available
+				broadcastDateUtc
+				broadcastId
+				bsonId
+				dateModified
+				description
+				domainBlocking
+				downloadUrl
+				duration
+				embedCode
+				embedCodeSrc
+				hidden
+				id
+				internalId
+				largeThumbnail
+				liveDuration
+				mediumThumbnail
+				regionBlocking
+				requireLogin
+				scheduleEntryId
+				schoolId
+				seasonId
+				sectionId
+				sectionTitle
+				shared
+				sharedSites
+				siteId
+				siteSlug
+				siteTitle
+				smallThumbnail
+				sourceBroadcastId
+				status
+				teamId
+				timezone
+				title
+				uploadSource
+				__typename
+			}
+		}
+	`;
+	const variables = { scheduleEntryId };
+	try {
+		const data = await hudlGraphQL({ query, variables, operationName: 'Web_Fan_GetBroadcastByScheduleEntryId_r1', snifferId });
+		return data.getBroadcastByScheduleEntryId || null;
+	} catch (err) {
+		console.warn('[HUDL] Failed to fetch broadcast:', err.message);
+		return null;
+	}
+}
+
 module.exports = {
 	hudlGraphQL,
 	fetchSchoolData,
 	fetchTeamSeason,
 	fetchTeamSeasons,
 	fetchTeamSchedule,
+	fetchBroadcast,
 	extractOrgId,
 	validateOrgUrl
 };

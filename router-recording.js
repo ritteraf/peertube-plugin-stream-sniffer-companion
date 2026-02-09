@@ -405,10 +405,112 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 
 			// Get school name and team data for matched game to generate title
 			let generatedTitle = null;
+			let customTitle = null;
+			let broadcastMetadata = null;
 			if (matchedGame && matchedTeamId) {
 				const orgData = (await storageManager.getData('hudl-organization')) || {};
 				const schoolName = orgData.name || null;
 				const teamData = schedules[matchedTeamId];
+				
+				// Fetch broadcast metadata for custom title detection
+				if (matchedGame.scheduleEntryId) {
+					try {
+						const hudl = require('./lib-hudl-scraper.js');
+						const hudlLimiter = require('./lib-hudl-rate-limiter.js');
+						const broadcast = await hudlLimiter.enqueue(() => 
+							hudl.fetchBroadcast(matchedGame.scheduleEntryId, snifferId)
+						);
+						
+						if (broadcast) {
+							/**
+							 * HUDL Broadcast Metadata - Available Fields:
+							 * 
+							 * STORED (useful):
+							 * - title: Custom title from HUDL
+							 * - description: Game description
+							 * - broadcastId: HUDL broadcast unique ID
+							 * - status: "Archived", "Live", "Upcoming", etc.
+							 * - duration: Total video duration (seconds)
+							 * - liveDuration: Actual live broadcast duration (seconds)
+							 * - broadcastDateUtc: Actual broadcast timestamp
+							 * - downloadUrl: Direct video download link (future use)
+							 * 
+							 * NOT STORED (not useful for our use case):
+							 * - id, internalId, bsonId: Internal HUDL IDs
+							 * - largeThumbnail, mediumThumbnail, smallThumbnail: We generate better ones
+							 * - embedCode, embedCodeSrc: We use our own embedding
+							 * - siteId, siteSlug, siteTitle, sectionId, sectionTitle: HUDL organizational data
+							 * - schoolId, teamId, seasonId: Already available from schedules
+							 * - timezone: Can derive from our data
+							 * - uploadSource, sourceBroadcastId, dateModified: Internal HUDL metadata
+							 * - accessPassIds, domainBlocking, regionBlocking, requireLogin, shared, sharedSites: HUDL access control
+							 * - available, hidden: HUDL visibility settings
+							 */
+							
+							// Store selective broadcast metadata on game object
+							broadcastMetadata = {
+								title: broadcast.title || null,
+								description: broadcast.description || null,
+								broadcastId: broadcast.broadcastId || null,
+								status: broadcast.status || null,
+								duration: broadcast.duration || null,
+								liveDuration: broadcast.liveDuration || null,
+								broadcastDateUtc: broadcast.broadcastDateUtc || null,
+								downloadUrl: broadcast.downloadUrl || null,
+								fetchedAt: new Date().toISOString()
+							};
+							
+							// Persist to game object for future access
+							matchedGame.broadcastMetadata = broadcastMetadata;
+							await storageManager.storeData('hudl-schedules', schedules);
+							
+							console.log('[PLUGIN HUDL] ✓ Broadcast metadata fetched and stored:', {
+								broadcastId: broadcastMetadata.broadcastId,
+								status: broadcastMetadata.status,
+								duration: broadcastMetadata.duration,
+								liveDuration: broadcastMetadata.liveDuration,
+								hasDownloadUrl: !!broadcastMetadata.downloadUrl,
+								title: broadcastMetadata.title
+							});
+						}
+						
+						if (broadcast && broadcast.title) {
+							// Check if home team appears in broadcast title (indicates normal game)
+							// Generate variations: "Elkhorn Valley High School" -> ["elkhorn valley", "ev", "e.v.", "evs"]
+							const schoolNameVariations = [];
+							if (schoolName) {
+								const baseSchool = schoolName.replace(/\s+(High School|Junior High|Middle School|HS|JH|MS)$/i, '').trim();
+								schoolNameVariations.push(baseSchool.toLowerCase());
+								
+								// Generate acronym variations
+								const words = baseSchool.split(/\s+/);
+								if (words.length > 1) {
+									const acronym = words.map(w => w[0]).join('');
+									schoolNameVariations.push(acronym.toLowerCase());
+									schoolNameVariations.push(acronym.split('').join('.').toLowerCase());
+									schoolNameVariations.push(acronym.toLowerCase() + 's');
+								}
+							}
+							
+							const broadcastTitleLower = broadcast.title.toLowerCase();
+							const isHomeTeamInTitle = schoolNameVariations.some(variation => 
+								broadcastTitleLower.includes(variation)
+							);
+							
+							if (!isHomeTeamInTitle) {
+								// Tournament/custom scenario - home team missing from title
+								customTitle = broadcast.title;
+								console.log('[PLUGIN HUDL] ✓ Custom title detected (tournament scenario):', customTitle);
+							} else {
+								console.log('[PLUGIN HUDL] ✓ Standard game title detected, using generated title');
+							}
+						}
+					} catch (err) {
+						console.warn('[PLUGIN HUDL] Failed to fetch broadcast metadata:', err.message);
+					}
+				}
+				
+				// Generate standard title
 				generatedTitle = generateGameTitle(matchedGame, teamData, schoolName);
 			}
 
@@ -429,8 +531,25 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					console.log(`[PLUGIN HUDL] ✓ Using pre-created scheduled live video for game ${matchedGame.id}:`, {
 						videoId: matchedGame.liveVideoId,
 						opponent: matchedGame.opponentDetails?.name,
-						title: matchedGame.generatedTitle
+						title: customTitle || matchedGame.generatedTitle
 					});
+
+					// Update video title if custom title detected (tournament scenario)
+					if (customTitle && customTitle !== matchedGame.generatedTitle) {
+						try {
+							const { updateVideoMetadata } = require('./lib-peertube-api.js');
+							await updateVideoMetadata({
+								videoId: matchedGame.liveVideoId,
+								updates: { name: customTitle },
+								oauthToken: snifferOAuthToken,
+								peertubeHelpers,
+								settingsManager
+							});
+							console.log('[PLUGIN HUDL] ✓ Updated video title for tournament scenario:', customTitle);
+						} catch (err) {
+							console.warn('[PLUGIN HUDL] Failed to update video title:', err.message);
+						}
+					}
 
 					const schedule = schedules[matchedTeamId];
 					const seasonYear = schedule?.seasonYear;
@@ -447,7 +566,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						playlistId: teamMapping.seasons?.[seasonYear]?.playlistId || null,
 						seasonYear,
 						startTime: event.startTime || new Date().toISOString(),
-						gameId: matchedGame.id
+						gameId: matchedGame.id,
+						broadcastMetadata: broadcastMetadata || null
 					};
 
 					return res.status(200).json({
@@ -459,7 +579,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 							rtmpUrl: matchedGame.rtmpUrl,
 							streamKey: matchedGame.streamKey,
 							isNew: false,
-							videoTitle: matchedGame.generatedTitle
+							videoTitle: customTitle || matchedGame.generatedTitle
 						},
 						matchInfo: {
 							opponent: matchedGame.opponentDetails?.name,
@@ -497,7 +617,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 
 				const liveVideo = await createPeerTubeLiveVideo({
 					channelId: teamMapping.channelId,
-					name: generatedTitle,
+					name: customTitle || generatedTitle,
 					description: teamMapping.description || `${teamMapping.teamName} game`,
 					category: teamMapping.category !== undefined ? teamMapping.category : cameraAssignment.defaultStreamCategory,
 					privacy: teamMapping.privacy !== undefined ? teamMapping.privacy : cameraAssignment.privacyId,
@@ -536,7 +656,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				playlistId: teamMapping.seasons?.[seasonYear]?.playlistId || null,
 				seasonYear: seasonYear,
 				startTime: event.startTime || new Date().toISOString(),
-				gameId: matchedGame.id
+				gameId: matchedGame.id,
+				broadcastMetadata: broadcastMetadata || null
 			};
 				return res.status(200).json({
 					acknowledged: true,
@@ -547,7 +668,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						rtmpUrl: liveVideo.rtmpUrl,
 						streamKey: liveVideo.streamKey,
 						isNew: true,
-						videoTitle: generatedTitle
+						videoTitle: customTitle || generatedTitle
 					},
 					isDuplicate: false,
 					hudl: true,
