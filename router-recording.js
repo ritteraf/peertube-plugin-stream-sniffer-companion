@@ -349,52 +349,8 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						reason: gamesEvaluated === 0 ? 'no-games-in-schedules' : 'no-time-match'
 					});
 					
-					// Fallback: Try refreshing teams for this camera and retry matching
-					const settings = await settingsManager.getSetting('hudl-org-url');
-					const hudlOrgUrl = settings || process.env.HUDL_ORG_URL || '';
-					
-					if (hudlOrgUrl && event.cameraId && event.startTime) {
-						console.log('[PLUGIN HUDL] Attempting fallback refresh for late-added games...');
-						const { refreshAndRetryMatch } = require('./lib-fallback-match.js');
-						
-						const fallbackMatch = await refreshAndRetryMatch({
-							cameraId: event.cameraId,
-							snifferId,
-							startTime: event.startTime,
-							storageManager,
-							hudlOrgUrl
-						});
-						
-						if (fallbackMatch) {
-							matchedGame = fallbackMatch.game;
-							matchedTeamId = fallbackMatch.teamId;
-							matchedChannelId = hudlMappings[fallbackMatch.teamId]?.channelId;
-							
-							console.log('[PLUGIN HUDL] ✓ Game matched via fallback:', {
-								opponent: fallbackMatch.game.opponentDetails?.name,
-								teamName: schedules[fallbackMatch.teamId]?.teamName
-							});
-							
-							// Generate thumbnail for this matchup
-							const opponentSchoolId = fallbackMatch.game.opponentDetails?.schoolId;
-							if (fallbackMatch.teamId && opponentSchoolId) {
-								const { generateSingleThumbnail } = require('./lib-thumbnail-generator.js');
-								const teamData = schedules[fallbackMatch.teamId];
-								const result = await generateSingleThumbnail({
-									homeTeamId: fallbackMatch.teamId,
-									homeLogo: teamData?.logoURL || null,
-									awayTeamId: opponentSchoolId,
-									awayLogo: fallbackMatch.game.opponentDetails?.profileImageUri || null
-								});
-								if (result.path) {
-									thumbnailPath = result.path;
-									if (result.generated) {
-										console.log('[PLUGIN HUDL] ✓ Generated new thumbnail for late-added game');
-									}
-								}
-							}
-						}
-					}
+					// Don't block - matchedGame stays null and we'll create temp video below
+					// Fallback will run async in background after response is sent
 				}
 			} else {
 				console.log('[PLUGIN HUDL] No startTime provided, skipping game matching');
@@ -701,9 +657,31 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					storageManager
 				});
 
+				// Start async fallback to update video if late-added game is found
+				const hudlOrgUrl = await settingsManager.getSetting('hudl-org-url') || process.env.HUDL_ORG_URL || '';
+				if (hudlOrgUrl && event.cameraId && event.startTime) {
+					console.log('[PLUGIN HUDL] Starting async fallback refresh for late-added games...');
+					const { refreshAndUpdateVideo } = require('./lib-fallback-match.js');
+					
+					// Fire and forget - don't await
+					refreshAndUpdateVideo({
+						cameraId: event.cameraId,
+						snifferId,
+						startTime: event.startTime,
+						videoId: liveStream.id,
+						oauthToken: snifferOAuthToken,
+						storageManager,
+						peertubeHelpers,
+						settingsManager,
+						hudlOrgUrl
+					}).catch(err => {
+						console.error('[PLUGIN HUDL] Async fallback error:', err.message);
+					});
+				}
+
 				return res.status(200).json({
 					acknowledged: true,
-					message: 'Using HUDL live video (fallback config - temporary)',
+					message: 'Using HUDL live video (fallback config - temporary, async refresh started)',
 					streamId: liveStream.id,
 					liveStream: {
 						videoId: liveStream.id,
