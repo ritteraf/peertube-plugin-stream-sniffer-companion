@@ -523,7 +523,9 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						seasonYear,
 						startTime: event.startTime || new Date().toISOString(),
 						gameId: matchedGame.id,
-						broadcastMetadata: broadcastMetadata || null
+						broadcastMetadata: broadcastMetadata || null,
+						rtmpUrl: matchedGame.rtmpUrl,
+						streamKey: matchedGame.streamKey
 					};
 
 					return res.status(200).json({
@@ -613,7 +615,9 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 				seasonYear: seasonYear,
 				startTime: event.startTime || new Date().toISOString(),
 				gameId: matchedGame.id,
-				broadcastMetadata: broadcastMetadata || null
+				broadcastMetadata: broadcastMetadata || null,
+				rtmpUrl: liveVideo.rtmpUrl,
+				streamKey: liveVideo.streamKey
 			};
 				return res.status(200).json({
 					acknowledged: true,
@@ -787,6 +791,119 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 			acknowledged: true,
 			message: 'Recording stopped'
 		});
+	});
+
+	// POST /recording-recover
+	// Called by the Stream Sniffer when FFmpeg crashes mid-recording (e.g. exit code 224).
+	// Returns the existing RTMP credentials for an active live video so the relay can restart
+	// without losing the stream. Does NOT create a new video.
+	router.post('/recording-recover', requireAuth, async (req, res) => {
+		const snifferId = req.snifferId;
+		const { cameraId, videoId } = req.body || {};
+		const streamToken = req.headers['x-stream-token'] || req.headers['authorization'] || null;
+
+		console.log('[PLUGIN RECOVERY] /recording-recover called:', {
+			snifferId,
+			cameraId,
+			videoId,
+			timestamp: new Date().toISOString()
+		});
+
+		// Input validation
+		if (!cameraId || typeof cameraId !== 'string') {
+			console.warn('[PLUGIN RECOVERY] Invalid cameraId:', cameraId);
+			return res.status(400).json({ error: 'Request body must include cameraId (string)' });
+		}
+		if (typeof videoId !== 'number') {
+			console.warn('[PLUGIN RECOVERY] Invalid videoId:', videoId);
+			return res.status(400).json({ error: 'Request body must include videoId (number)' });
+		}
+		if (!storageManager) {
+			return res.status(500).json({ error: 'PLUGIN_STORAGE_NOT_INITIALIZED' });
+		}
+
+		// Stream token validation
+		const sniffers = (await storageManager.getData('sniffers')) || {};
+		const snifferEntry = sniffers[snifferId];
+		const expectedStreamToken = snifferEntry && snifferEntry.streamToken;
+		if (streamToken !== expectedStreamToken) {
+			console.warn('[PLUGIN RECOVERY] 401: Stream token mismatch', { snifferId });
+			return res.status(401).json({ error: 'Invalid stream token' });
+		}
+
+		const snifferOAuthToken = snifferEntry && snifferEntry.oauthToken;
+		if (!snifferOAuthToken) {
+			console.warn('[PLUGIN RECOVERY] No OAuth token for sniffer:', snifferId);
+			return res.status(401).json({ error: 'No PeerTube OAuth token found for sniffer' });
+		}
+
+		try {
+			// Verify the video exists
+			const video = await peertubeHelpers.videos.loadById(videoId);
+			if (!video) {
+				console.warn('[PLUGIN RECOVERY] Video not found:', { videoId, cameraId });
+				return res.status(404).json({ error: 'Video not found or no longer live' });
+			}
+
+			// Verify it is still live (state.id === 1 = PUBLISHED, isLive = true)
+			const isLive = video.isLive === true;
+			const isPublished = video.state && video.state.id === 1;
+			if (!isLive || !isPublished) {
+				console.warn('[PLUGIN RECOVERY] Video is not currently live:', { videoId, isLive, stateId: video.state?.id });
+				return res.status(400).json({ error: 'Video exists but is not currently live' });
+			}
+
+			// Fetch RTMP credentials from the PeerTube live endpoint
+			const { getBaseUrl } = require('./lib-peertube-api.js');
+			const baseUrl = await getBaseUrl(peertubeHelpers, settingsManager);
+			const liveDetailsRes = await fetch(`${baseUrl}/api/v1/videos/live/${videoId}`, {
+				headers: { 'Authorization': `Bearer ${snifferOAuthToken}` }
+			});
+			if (!liveDetailsRes.ok) {
+				const errText = await liveDetailsRes.text();
+				console.error('[PLUGIN RECOVERY] Failed to fetch live details:', { status: liveDetailsRes.status, errText, videoId });
+				return res.status(500).json({ error: 'Failed to retrieve RTMP credentials from PeerTube API' });
+			}
+			const liveDetails = await liveDetailsRes.json();
+			const { rtmpUrl, streamKey } = liveDetails;
+
+			if (!rtmpUrl || !streamKey) {
+				console.error('[PLUGIN RECOVERY] RTMP credentials missing in live details response:', { videoId, hasRtmpUrl: !!rtmpUrl, hasStreamKey: !!streamKey });
+				return res.status(500).json({ error: 'Failed to retrieve valid RTMP credentials' });
+			}
+
+			console.log('[PLUGIN RECOVERY] ✓ Recovery credentials provided:', {
+				snifferId,
+				cameraId,
+				videoId,
+				rtmpUrl,
+				streamKeyPrefix: streamKey.substring(0, 8) + '...',
+				timestamp: new Date().toISOString()
+			});
+
+			// Log recovery event
+			let log = (await storageManager.getData('recording-log')) || {};
+			if (!log[snifferId]) log[snifferId] = [];
+			log[snifferId].push({ type: 'recovery', cameraId, videoId, timestamp: new Date().toISOString() });
+			await storageManager.storeData('recording-log', log);
+
+			return res.status(200).json({
+				success: true,
+				rtmpUrl,
+				streamKey,
+				videoId,
+				message: 'Recovery credentials provided'
+			});
+		} catch (err) {
+			console.error('[PLUGIN RECOVERY] Error in /recording-recover:', {
+				error: err.message,
+				stack: err.stack,
+				videoId,
+				cameraId,
+				snifferId
+			});
+			return res.status(500).json({ error: 'Failed to retrieve recovery credentials', message: err.message });
+		}
 	});
 
 	return router;

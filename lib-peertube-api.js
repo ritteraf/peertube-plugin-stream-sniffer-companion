@@ -641,6 +641,7 @@ module.exports = {
 	getPeerTubeChannels,
 	getPeerTubeCategories,
 	getPeerTubePrivacyOptions,
+	getBaseUrl,
 
 	createPeerTubeLiveVideo,
 	parseTeamTags,
