@@ -342,20 +342,63 @@ async function refreshAndUpdateVideo({
 			.slice(0, 5);
 		
 		// Update video metadata
+		const metadataUpdates = {
+			name: generatedTitle,
+			tags: validTags,
+			description: teamMapping.description || `${teamData.teamName} vs ${matchedGame.opponentDetails?.name || 'opponent'}`
+		};
+
+		// Move video to the correct channel for this team (temp video was created under the camera's default channel)
+		if (teamMapping.channelId) {
+			metadataUpdates.channelId = teamMapping.channelId;
+		}
+
+		// Apply team-specific category and privacy (temp video used camera fallback values)
+		if (teamMapping.category !== undefined) {
+			metadataUpdates.category = teamMapping.category;
+		}
+		if (teamMapping.privacy !== undefined) {
+			metadataUpdates.privacy = teamMapping.privacy;
+		}
+
 		await updateVideoMetadata({
 			videoId,
-			updates: {
-				name: generatedTitle,
-				tags: validTags,
-				description: teamMapping.description || `${teamData.teamName} vs ${matchedGame.opponentDetails?.name || 'opponent'}`
-			},
+			updates: metadataUpdates,
 			oauthToken,
 			peertubeHelpers,
 			settingsManager
 		});
 		
-		console.log('[PLUGIN FALLBACK] ✓ Video metadata updated:', generatedTitle);
-		
+		console.log('[PLUGIN FALLBACK] ✓ Video metadata updated:', {
+			title: generatedTitle,
+			channelId: metadataUpdates.channelId ?? '(unchanged)',
+			category: metadataUpdates.category ?? '(unchanged)',
+			privacy: metadataUpdates.privacy ?? '(unchanged)'
+		});
+
+		// Update the in-memory session with full game context now that we have a match.
+		// The minimal session was written at video creation time; enrich it in-place so
+		// /active-streams reflects correct game info for the rest of the recording.
+		if (global.__ACTIVE_RECORDING_SESSIONS__?.[snifferId]?.[cameraId]) {
+			const existingSession = global.__ACTIVE_RECORDING_SESSIONS__[snifferId][cameraId];
+			const seasonYear = teamData.seasonYear || null;
+			global.__ACTIVE_RECORDING_SESSIONS__[snifferId][cameraId] = {
+				...existingSession,          // preserve liveVideoId, rtmpUrl, streamKey, startTime
+				teamId: matchedTeamId,
+				teamName: teamMapping.teamName || null,
+				opponent: matchedGame.opponentDetails?.name || null,
+				playlistId: teamMapping.seasons?.[seasonYear]?.playlistId || null,
+				seasonYear,
+				gameId: matchedGame.id || null,
+				isFallbackPending: false
+			};
+			console.log('[PLUGIN FALLBACK] ✓ Active session updated with game context:', {
+				teamName: teamMapping.teamName,
+				opponent: matchedGame.opponentDetails?.name,
+				gameId: matchedGame.id
+			});
+		}
+
 		// Generate and apply thumbnail
 		const opponentSchoolId = matchedGame.opponentDetails?.schoolId;
 		if (matchedTeamId && opponentSchoolId) {

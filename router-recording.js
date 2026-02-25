@@ -661,6 +661,25 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					storageManager
 				});
 
+				// Store minimal session so /active-streams shows the stream and /recording-stopped can clean up
+				if (!global.__ACTIVE_RECORDING_SESSIONS__[snifferId]) {
+					global.__ACTIVE_RECORDING_SESSIONS__[snifferId] = {};
+				}
+				global.__ACTIVE_RECORDING_SESSIONS__[snifferId][event.cameraId] = {
+					liveVideoId: liveStream.id,
+					teamId: null,
+					teamName: null,
+					opponent: null,
+					playlistId: null,
+					seasonYear: null,
+					startTime: event.startTime || new Date().toISOString(),
+					gameId: null,
+					broadcastMetadata: null,
+					rtmpUrl: liveStream.rtmpUrl,
+					streamKey: liveStream.streamKey,
+					isFallbackPending: true
+				};
+
 				// Start async fallback to update video if late-added game is found
 				const hudlOrgUrl = await settingsManager.getSetting('hudl-org-url') || process.env.HUDL_ORG_URL || '';
 				if (hudlOrgUrl && event.cameraId && event.startTime) {
