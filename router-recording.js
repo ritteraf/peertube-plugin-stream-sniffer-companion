@@ -532,6 +532,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 						acknowledged: true,
 						message: 'Using pre-created scheduled live video',
 						streamId: matchedGame.liveVideoId,
+						sport: schedule?.sport ? String(schedule.sport).toLowerCase() : null,
 						liveStream: {
 							videoId: matchedGame.liveVideoId,
 							rtmpUrl: matchedGame.rtmpUrl,
@@ -623,6 +624,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					acknowledged: true,
 					message: 'Created live video on-the-fly (matched game, no pre-created video)',
 					streamId: liveVideo.id,
+					sport: schedule?.sport ? String(schedule.sport).toLowerCase() : null,
 					liveStream: {
 						videoId: liveVideo.id,
 						rtmpUrl: liveVideo.rtmpUrl,
@@ -706,6 +708,7 @@ module.exports = function createRecordingRouter({ storageManager, settingsManage
 					acknowledged: true,
 					message: 'Using HUDL live video (fallback config - temporary, async refresh started)',
 					streamId: liveStream.id,
+					sport: null,
 					liveStream: {
 						videoId: liveStream.id,
 						rtmpUrl: liveStream.rtmpUrl,

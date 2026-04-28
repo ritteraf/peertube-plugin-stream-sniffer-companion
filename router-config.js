@@ -322,6 +322,15 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					assignmentsCreated: 0
 				});
 			}
+			if (assignment.scoreboardEndpointURL !== undefined
+				&& assignment.scoreboardEndpointURL !== null
+				&& typeof assignment.scoreboardEndpointURL !== 'string') {
+				return res.status(400).json({
+					success: false,
+					message: 'scoreboardEndpointURL must be a string or null',
+					assignmentsCreated: 0
+				});
+			}
 			// Add more field checks as needed
 		}
 		try {
