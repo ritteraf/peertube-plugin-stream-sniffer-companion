@@ -279,7 +279,9 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 		const snifferId = req.snifferId;
 		try {
 			const cameras = await getCameraAssignments();
-			const assignments = cameras[snifferId] ? Object.values(cameras[snifferId]) : [];
+			const assignments = cameras[snifferId]
+				? Object.values(cameras[snifferId]).map(a => ({ overlayMode: null, ...a }))
+				: [];
 			// ...existing code...
 			const pkg = require('./package.json');
 			return res.status(200).json({
@@ -331,6 +333,16 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 					assignmentsCreated: 0
 				});
 			}
+			if (assignment.overlayMode !== undefined && assignment.overlayMode !== null) {
+				if (typeof assignment.overlayMode !== 'string'
+					|| !['relayOnly', 'simpleOverlay', 'advancedOverlay'].includes(assignment.overlayMode)) {
+					return res.status(400).json({
+						success: false,
+						message: 'overlayMode must be null or one of: "relayOnly", "simpleOverlay", "advancedOverlay"',
+						assignmentsCreated: 0
+					});
+				}
+			}
 			// Add more field checks as needed
 		}
 		try {
@@ -349,7 +361,10 @@ module.exports = function createConfigRouter({ storageManager, settingsManager, 
 			}
 			// Add/update assignments
 			for (const assignment of assignments) {
-				cameras[snifferId][assignment.cameraId] = assignment;
+				cameras[snifferId][assignment.cameraId] = {
+					...assignment,
+					overlayMode: assignment.overlayMode ?? null
+				};
 			}
 			await setCameraAssignments(cameras);
 
